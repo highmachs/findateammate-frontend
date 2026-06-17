@@ -1,0 +1,5 @@
+Contact: mailto:findateammate.ahilight@gmail.com
+Expires: 2027-03-11T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://findateammate.online/.well-known/security.txt
+Policy: https://findateammate.online/safety

@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "posts_event_date_idx" ON "posts" ("event_date");

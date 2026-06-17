@@ -1,0 +1,78 @@
+{
+  "name": "findateammate-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development tsx backend/index.ts",
+    "build": "tsx script/build.ts",
+    "start": "cross-env NODE_ENV=production node dist/index.cjs",
+    "check": "tsc",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "node script/sync-drizzle-journal.mjs && node script/repair-drizzle-history.mjs && drizzle-kit migrate --config drizzle.config.ts",
+    "db:push": "drizzle-kit push --config drizzle.config.ts"
+  },
+  "dependencies": {
+    "argon2": "^0.44.0",
+    "cloudinary": "^2.9.0",
+    "compression": "^1.8.1",
+    "connect-pg-simple": "^10.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "csrf-csrf": "^4.0.3",
+    "dotenv": "^17.2.3",
+    "drizzle-kit": "^0.31.8",
+    "drizzle-orm": "^0.45.1",
+    "drizzle-zod": "^0.8.3",
+    "express": "^5.0.1",
+    "express-rate-limit": "^8.2.1",
+    "express-session": "^1.18.1",
+    "helmet": "^8.1.0",
+    "multer": "^2.0.2",
+    "nanoid": "^5.1.6",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pg": "^8.18.0",
+    "socket.io": "^4.8.3",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "ws": "^8.18.0",
+    "zod": "^4.3.6",
+    "zod-validation-error": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.8.1",
+    "@types/connect-pg-simple": "^7.0.3",
+    "@types/cookie": "^0.6.0",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cookie-signature": "^1.1.2",
+    "@types/cors": "^2.8.19",
+    "@types/dotenv": "^6.1.1",
+    "@types/express": "^5.0.0",
+    "@types/express-session": "^1.18.0",
+    "@types/helmet": "^0.0.48",
+    "@types/multer": "^2.0.0",
+    "@types/node": "20.19.27",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^7.0.9",
+    "@types/passport": "^1.0.17",
+    "@types/passport-google-oauth20": "^2.0.17",
+    "@types/pg": "^8.16.0",
+    "@types/ws": "^8.5.13",
+    "cross-env": "^10.1.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.5",
+    "typescript": "5.6.3"
+  },
+  "overrides": {
+    "drizzle-kit": {
+      "@esbuild-kit/esm-loader": "npm:tsx@^4.20.4"
+    }
+  },
+  "optionalDependencies": {
+    "bufferutil": "^4.0.8"
+  }
+}

@@ -1,0 +1,58 @@
+
+> findateammate-frontend@1.0.0 check
+> tsc
+
+shared/routes.ts(2,28): error TS6133: 'insertConnectionRequestSchema' is declared but its value is never read.
+shared/routes.ts(2,59): error TS6133: 'insertMessageSchema' is declared but its value is never read.
+src/components/AdminStats.tsx(116,53): error TS6133: 'entry' is declared but its value is never read.
+src/components/ErrorBoundary.tsx(1,8): error TS6133: 'React' is declared but its value is never read.
+src/components/GlobalListener.tsx(4,1): error TS6133: 'logger' is declared but its value is never read.
+src/components/MaintenancePanel.tsx(8,1): error TS6133: 'Switch' is declared but its value is never read.
+src/components/MaintenancePanel.tsx(13,1): error TS6133: 'badgeVariants' is declared but its value is never read.
+src/components/ObservabilityPanel.tsx(16,11): error TS6133: 'fetchErrorLogs' is declared but its value is never read.
+src/components/PostCard.tsx(4,25): error TS6133: 'ArrowRight' is declared but its value is never read.
+src/components/PostCard.tsx(4,74): error TS6133: 'Globe' is declared but its value is never read.
+src/components/PostCard.tsx(5,1): error TS6133: 'SafeExternalLink' is declared but its value is never read.
+src/components/PostCard.tsx(14,1): error TS6192: All imports in import declaration are unused.
+src/components/PostCard.tsx(24,34): error TS6133: 'index' is declared but its value is never read.
+src/components/PostCard.tsx(59,9): error TS6133: 'bioSkills' is declared but its value is never read.
+src/components/PostCard.tsx(64,9): error TS6133: 'isRecommended' is declared but its value is never read.
+src/components/ReportsPanel.tsx(16,1): error TS6133: 'apiRequest' is declared but its value is never read.
+src/hooks/use-maintenance.tsx(1,59): error TS6133: 'useState' is declared but its value is never read.
+src/hooks/use-observability.ts(37,66): error TS6133: 'get' is declared but its value is never read.
+src/hooks/use-store.ts(3,16): error TS6133: 'InsertUser' is declared but its value is never read.
+src/lib/monitor.ts(1,1): error TS6133: 'trackEvent' is declared but its value is never read.
+src/pages/AdminDashboard.tsx(17,23): error TS6133: 'Redirect' is declared but its value is never read.
+src/pages/Browse.tsx(7,18): error TS6133: 'SlidersHorizontal' is declared but its value is never read.
+src/pages/Browse.tsx(10,1): error TS6192: All imports in import declaration are unused.
+src/pages/Chat.tsx(7,16): error TS6133: 'Phone' is declared but its value is never read.
+src/pages/Chat.tsx(7,23): error TS6133: 'Video' is declared but its value is never read.
+src/pages/Chat.tsx(7,55): error TS6133: 'User' is declared but its value is never read.
+src/pages/Chat.tsx(28,70): error TS6133: 'addMessage' is declared but its value is never read.
+src/pages/Contact.tsx(2,38): error TS6133: 'MapPin' is declared but its value is never read.
+src/pages/CreatePost.tsx(17,1): error TS6133: 'Badge' is declared but its value is never read.
+src/pages/CreatePost.tsx(249,35): error TS6133: 'fetchPosts' is declared but its value is never read.
+src/pages/CreatePost.tsx(250,10): error TS6133: 'location' is declared but its value is never read.
+src/pages/Events.tsx(5,82): error TS6133: 'SlidersHorizontal' is declared but its value is never read.
+src/pages/Events.tsx(11,10): error TS6133: 'differenceInHours' is declared but its value is never read.
+src/pages/Events.tsx(228,21): error TS6133: 'maxHours' is declared but its value is never read.
+src/pages/Guidelines.tsx(2,10): error TS6133: 'Heart' is declared but its value is never read.
+src/pages/Login.tsx(8,41): error TS6133: 'CardTitle' is declared but its value is never read.
+src/pages/Login.tsx(8,52): error TS6133: 'CardDescription' is declared but its value is never read.
+src/pages/Login.tsx(14,10): error TS6133: 'apiRequest' is declared but its value is never read.
+src/pages/Login.tsx(51,11): error TS6133: 'handleGoogleLogin' is declared but its value is never read.
+src/pages/Maintenance.tsx(4,10): error TS6133: 'AlertCircle' is declared but its value is never read.
+src/pages/Maintenance.tsx(19,9): error TS6133: 'isMaintenance' is declared but its value is never read.
+src/pages/Maintenance.tsx(20,9): error TS6133: 'isPartial' is declared but its value is never read.
+src/pages/Onboarding.tsx(12,10): error TS6133: 'apiRequest' is declared but its value is never read.
+src/pages/PasswordReset.tsx(11,1): error TS6133: 'apiRequest' is declared but its value is never read.
+src/pages/PasswordReset.tsx(25,10): error TS6133: 'location' is declared but its value is never read.
+src/pages/Profile.tsx(12,71): error TS6133: 'Twitter' is declared but its value is never read.
+src/pages/Profile.tsx(12,80): error TS6133: 'Linkedin' is declared but its value is never read.
+src/pages/PublicProfile.tsx(17,5): error TS6133: 'Twitter' is declared but its value is never read.
+src/pages/PublicProfile.tsx(18,5): error TS6133: 'Linkedin' is declared but its value is never read.
+src/pages/Register.tsx(3,1): error TS6133: 'z' is declared but its value is never read.
+src/pages/Register.tsx(11,1): error TS6192: All imports in import declaration are unused.
+src/pages/Register.tsx(13,10): error TS6133: 'apiRequest' is declared but its value is never read.
+src/pages/Safety.tsx(6,1): error TS6133: 'Button' is declared but its value is never read.
+src/pages/SupportPage.tsx(5,10): error TS6133: 'apiRequest' is declared but its value is never read.
