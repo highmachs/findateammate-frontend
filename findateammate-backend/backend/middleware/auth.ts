@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import type { User as AppUser } from "@shared/schema";
+import type { User as AppUser } from "@shared/schema.sqlite";
 
 // Extend Express Request to include user session
 declare module "express-serve-static-core" {

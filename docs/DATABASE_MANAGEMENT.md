@@ -1,106 +1,75 @@
-# Database Management Guide
+# Database Management Guide (Turso / libSQL)
 
-## Problem: Database Not Persisting Across Devices
+> [!WARNING]
+> FindATeammate has migrated from Dockerized PostgreSQL to Turso (serverless SQLite). The previous `docker-compose` routines and `.sh`/`.ps1` backup scripts are deprecated. 
 
-When you transfer your project via zip files, the Docker volume containing the PostgreSQL database is **NOT included**. This is why your test accounts disappear.
+## Turso Architecture
 
-## Solution: Backup and Restore
+FindATeammate now utilizes **Turso** via `@libsql/client`. 
+- **Production URL**: Controlled by `TURSO_DATABASE_URL` (typically `libsql://...`)
+- **Authentication**: `TURSO_AUTH_TOKEN` is strictly required to connect.
+- **Local Fallback**: For local offline development, `TURSO_DATABASE_URL=file:./local.db` triggers local SQLite file storage, which is perfectly compatible with the application's queries.
 
-### Quick Start
+## Managing the Database
 
-#### Windows (PowerShell)
-
-```powershell
-# Backup database
-.\backup_db.ps1
-
-# Restore database
-.\restore_db.ps1 -BackupFile .\db_backups\findateammate_backup_YYYYMMDD_HHMMSS.zip
-```
-
-#### Linux/Mac (Bash)
+### Local Development
+When working locally, you can use a local SQLite file (e.g. `file:./local.db`). The `drizzle-kit` tool manages migrations natively:
 
 ```bash
-# Backup database
-./backup_db.sh
+# Push schema updates directly to the local file
+npm run db:push
 
-# Restore database
-./restore_db.sh ./db_backups/findateammate_backup_YYYYMMDD_HHMMSS.sql.gz
+# Generate migration files
+npm run db:generate
 ```
 
-## Workflow for Transferring to Another PC
+### Accessing Production Turso Shell
+To access the database manually, use the Turso CLI:
 
-### On Source PC:
+```bash
+# Authenticate (One-time)
+turso auth login
 
-1. **Backup the database**:
-   ```powershell
-   .\backup_db.ps1
-   ```
-2. **Include backup in zip**: Make sure to include the `db_backups` folder when zipping your project
+# Connect to production database shell
+turso db shell findateammate-prod
 
-### On Destination PC:
+# Example queries:
+# > .tables
+# > SELECT * FROM users LIMIT 10;
+```
 
-1. **Extract the zip file**
-2. **Start Docker services**:
-   ```powershell
-   docker-compose up -d
-   ```
-3. **Restore the database**:
-   ```powershell
-   .\restore_db.ps1 -BackupFile .\db_backups\findateammate_backup_YYYYMMDD_HHMMSS.zip
-   ```
+## Backups & Restores
+
+Since Turso is fully managed, daily automated backups are handled natively by the Turso platform rather than local cron-jobs. You can initiate manual dumps from the Turso CLI if you wish to export the data.
+
+```bash
+# Export production DB to a local file
+turso db dump findateammate-prod > backup.sql
+```
 
 ## Creating Test Accounts
 
-### Via API (Recommended)
+You can insert test users locally using standard API routes:
 
 ```powershell
-# Register a test user
 curl -X POST http://localhost:5000/api/register `
   -H "Content-Type: application/json" `
   -d '{\"email\":\"test@test.com\",\"password\":\"test123\",\"username\":\"testuser\"}'
 ```
 
-### Via Database Direct Insert
-
-```powershell
-# Connect to database
-docker-compose exec db psql -U postgres findateammate
-
-# Insert test user (password: test123)
-INSERT INTO users (email, password, username)
-VALUES ('test@test.com', '$argon2id$v=19$m=65536,t=3,p=4$...', 'testuser');
+Or you can use Drizzle Studio to manually insert rows graphically:
+```bash
+npx drizzle-kit studio
 ```
 
-## Automatic Backups
+## Concurrency & Limits
+- **Turso Single-Writer**: Writes are automatically serialized through the primary node. We use standard Drizzle atomic `db.transaction(async (tx) => { ... })` scopes (which inherently issue `BEGIN IMMEDIATE` to prevent double-booking) instead of Postgres `FOR UPDATE` read-locks. 
+- **Session State**: Sessions are stored directly in SQLite using our custom `TursoSessionStore` extending `express-session`, completely replacing `connect-pg-simple`.
 
-### Schedule Daily Backups (Windows Task Scheduler)
+## Rollback (Emergency PostgreSQL Cutover Reversal)
+For 7 days post-cutover, the legacy Render RDS Postgres database remains online (read-only mode). To temporarily revert to PostgreSQL (if catastrophic failure occurs):
+1. Re-add `pg` and `connect-pg-simple` packages via `npm i`.
+2. Flip the configuration in `.env` to restore `DATABASE_URL` holding the PostgreSQL connection string. 
+3. Re-enable `pg.Pool` initialization inside `backend/db.ts`. 
 
-1. Open Task Scheduler
-2. Create Basic Task
-3. Set trigger: Daily at 2 AM
-4. Action: Start a program
-5. Program: `powershell.exe`
-6. Arguments: `-File "C:\path\to\findateammate\backup_db.ps1"`
-
-## Backup Location
-
-Backups are stored in: `./db_backups/`
-
-- Format: `findateammate_backup_YYYYMMDD_HHMMSS.zip` (Windows)
-- Format: `findateammate_backup_YYYYMMDD_HHMMSS.sql.gz` (Linux)
-- Retention: Last 10 backups are kept automatically
-
-## Troubleshooting
-
-### "Invalid email or password" after restore
-
-- Make sure you restored the correct backup file
-- Check that Docker services are running: `docker-compose ps`
-- Verify database connection: `docker-compose exec db psql -U postgres findateammate -c "\dt"`
-
-### Backup fails
-
-- Ensure Docker services are running
-- Check disk space
-- Verify PostgreSQL container is healthy: `docker-compose ps`
+Do not delete the legacy PostgreSQL database from Render until the 7-day safety window expires!

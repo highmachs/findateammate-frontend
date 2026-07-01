@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { db } from '../db';
-import { auditLogs } from '@shared/schema';
+import { auditLogs } from '../../shared/schema.sqlite';
 import { and, gte, lt } from 'drizzle-orm';
 import { logger } from './logger';
 import { mailProvider } from './mail';

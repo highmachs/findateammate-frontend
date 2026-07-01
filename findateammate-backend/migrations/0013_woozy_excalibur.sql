@@ -1,2 +1,0 @@
-CREATE INDEX IF NOT EXISTS "messages_chat_timestamp_idx" ON "messages" USING btree ("chat_id","timestamp");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "notifications_user_created_idx" ON "notifications" USING btree ("user_id","created_at");

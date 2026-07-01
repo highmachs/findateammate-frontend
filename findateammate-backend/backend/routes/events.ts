@@ -7,7 +7,7 @@
 
 import { db } from "../db";
 import { storage } from "../storage";
-import { eventRegistrations, notifications } from "@shared/schema";
+import { eventRegistrations, notifications } from "../../shared/schema.sqlite";
 import { computeMatchScore } from "../lib/matching";
 import { eq, and, or, sql, inArray, asc } from "drizzle-orm";
 import type { Request, Response, NextFunction } from "express";
@@ -134,54 +134,59 @@ export async function registerForEvent(
       status = approvalRequired ? "pending" : "confirmed";
     }
 
-    // Create registration with transaction to prevent race condition on cap
     let registration;
-    try {
-      registration = await db.transaction(async (tx) => {
-        // Serialize capacity checks per event to avoid concurrent overbooking.
-        await tx.execute(sql`SELECT id FROM posts WHERE id = ${eventId} FOR UPDATE`);
-
-        // Check participant cap WITHIN transaction to prevent race conditions
-        if (event.maxCrossDeptParticipants) {
-          const crossDeptCount = await tx
-            .select({ count: sql<number>`count(*)` })
-            .from(eventRegistrations)
-            .where(
-              and(
-                eq(eventRegistrations.postId, eventId),
-                eq(eventRegistrations.registrationType, "cross_department"),
-                or(
-                  eq(eventRegistrations.status, "confirmed"),
-                  eq(eventRegistrations.status, "approved")
+    let attempts = 0;
+    while (attempts < 10) {
+      try {
+        registration = await db.transaction(async (tx) => {
+          if (event.maxCrossDeptParticipants) {
+            const crossDeptCount = await tx
+              .select({ count: sql<number>`count(*)` })
+              .from(eventRegistrations)
+              .where(
+                and(
+                  eq(eventRegistrations.postId, eventId),
+                  eq(eventRegistrations.registrationType, "cross_department"),
+                  or(
+                    eq(eventRegistrations.status, "confirmed"),
+                    eq(eventRegistrations.status, "approved")
+                  )
                 )
-              )
-            );
+              );
 
-          if (Number(crossDeptCount[0]?.count || 0) >= event.maxCrossDeptParticipants) {
-            throw new Error("CAPACITY_EXCEEDED");
+            if (Number(crossDeptCount[0]?.count || 0) >= event.maxCrossDeptParticipants) {
+              throw new Error("CAPACITY_EXCEEDED");
+            }
           }
-        }
 
-        // Create registration within transaction
-        const [newReg] = await tx.insert(eventRegistrations).values({
-          postId: eventId,
-          userId,
-          registrationType: registrationType as "department" | "cross_department",
-          matchScore: matchScore,
-          status: status as "pending" | "approved" | "rejected" | "confirmed",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        }).returning();
-        
-        return newReg;
-      });
-    } catch (txErr: any) {
-      if (txErr.message === "CAPACITY_EXCEEDED") {
-        return res.status(400).json({
-          message: "This event has reached the maximum number of cross-department participants"
-        });
+          const [newReg] = await tx.insert(eventRegistrations).values({
+            postId: eventId,
+            userId,
+            registrationType: registrationType as "department" | "cross_department",
+            matchScore: matchScore,
+            status: status as "pending" | "approved" | "rejected" | "confirmed",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }).returning();
+          
+          return newReg;
+        }, { behavior: 'immediate' });
+        break; // Success, exit retry loop
+      } catch (txErr: any) {
+        if (txErr.code === "SQLITE_BUSY" || txErr.message?.includes("SQLITE_BUSY") || txErr.message?.includes("database is locked")) {
+          attempts++;
+          if (attempts >= 10) throw txErr; // Max retries exceeded
+          // Exponential backoff with jitter
+          await new Promise(r => setTimeout(r, 10 + Math.random() * 40 * attempts));
+          continue;
+        }
+        if (txErr.message === "CAPACITY_EXCEEDED") {
+          return res.status(400).json({
+            message: "This event has reached the maximum number of cross-department participants"
+          });
+        }
+        throw txErr;
       }
-      throw txErr;
     }
 
     // Log registration
@@ -207,7 +212,7 @@ export async function registerForEvent(
         message: `${student.name} from ${student.department} ${status === "pending" ? "requested to join" : "registered for"} ${event.eventName}${matchScore ? ` (${matchScore}% match)` : ""}`,
         metadata: {
           eventId,
-          registrationId: registration.id,
+          registrationId: registration?.id,
           studentId: userId,
           studentName: student.name,
           matchScore,
@@ -378,7 +383,6 @@ export async function approveRegistration(
     let approvalTxError: string | null = null;
     const updated = await db.transaction(async (tx) => {
       // Serialize approvals per event so capacity checks remain accurate.
-      await tx.execute(sql`SELECT id FROM posts WHERE id = ${eventId} FOR UPDATE`);
 
       const [pendingRegistration] = await tx
         .select()
@@ -720,7 +724,6 @@ export async function approveAllRegistrations(
     }
 
     const result = await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT id FROM posts WHERE id = ${eventId} FOR UPDATE`);
 
       const pending = await tx
         .select()
@@ -847,7 +850,6 @@ export async function rejectAllRegistrations(
     }
 
     const rejectedRegistrations = await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT id FROM posts WHERE id = ${eventId} FOR UPDATE`);
 
       const pendingRegistrations = await tx
         .select()

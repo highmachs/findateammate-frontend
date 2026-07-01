@@ -1,2 +1,0 @@
-ALTER TABLE "connection_requests" ADD COLUMN IF NOT EXISTS "from_user_last_cleared" timestamp;--> statement-breakpoint
-ALTER TABLE "connection_requests" ADD COLUMN IF NOT EXISTS "to_user_last_cleared" timestamp;

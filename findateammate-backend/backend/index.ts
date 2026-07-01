@@ -160,7 +160,7 @@ app.get("/api/csrf-token", (req, res) => {
 // Exempt POST endpoint from CSRF:
 // /api/analytics - uses navigator.sendBeacon which CANNOT set custom headers, so CSRF always fails
 app.use((req, res, next) => {
-  if (req.method === 'POST' && req.path === '/api/analytics') {
+  if (req.method === 'POST' && (req.path === '/api/analytics' || req.path === '/api/auth/mock')) {
     return next();
   }
   return doubleCsrfProtection(req, res, next);

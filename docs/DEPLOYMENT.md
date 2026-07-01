@@ -1,9 +1,9 @@
-# Deployment Guide
+# Deployment Guide (Turso Architecture)
 
 ## Prerequisites
 
 - Node.js 20+
-- PostgreSQL 14+
+- Turso CLI (for DB management)
 - PM2 installed globally: `npm install -g pm2`
 
 ## Initial Deployment
@@ -13,14 +13,14 @@
 ```bash
 # Copy and configure environment variables
 cp .env.example .env
-nano .env  # Set SESSION_SECRET, DATABASE_URL, PRODUCTION_DOMAIN
+nano .env  # Set SESSION_SECRET, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, PRODUCTION_DOMAIN
 ```
 
 ### 2. Database Setup
 
 ```bash
-# Run migrations
-npm run db:migrate
+# Push schema securely to Turso
+npm run db:push
 ```
 
 ### 3. Build Application
@@ -48,8 +48,8 @@ git pull origin main
 # Install dependencies
 npm install
 
-# Run migrations
-npm run db:migrate
+# Push potential schema changes to Turso
+npm run db:push
 
 # Rebuild
 npm run build
@@ -93,15 +93,9 @@ curl http://localhost:5000/health
 ## Backup & Restore
 
 ### Database Backup
-
+Backups are natively scheduled and managed by the Turso platform. To manually export:
 ```bash
-pg_dump $DATABASE_URL > backup_$(date +%Y%m%d_%H%M%S).sql
-```
-
-### Database Restore
-
-```bash
-psql $DATABASE_URL < backup_YYYYMMDD_HHMMSS.sql
+turso db dump findateammate-prod > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
 ## Troubleshooting
@@ -110,7 +104,7 @@ psql $DATABASE_URL < backup_YYYYMMDD_HHMMSS.sql
 
 1. Check logs: `pm2 logs findateammate --lines 100`
 2. Verify environment variables: `pm2 env 0`
-3. Check database connection: `psql $DATABASE_URL`
+3. Check database connection validity and auth tokens using Turso CLI: `turso db shell findateammate-prod`
 
 ### High Memory Usage
 

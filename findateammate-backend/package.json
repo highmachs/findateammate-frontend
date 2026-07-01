@@ -11,13 +11,24 @@
     "check": "tsc",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "node script/sync-drizzle-journal.mjs && node script/repair-drizzle-history.mjs && drizzle-kit migrate --config drizzle.config.ts",
-    "db:push": "drizzle-kit push --config drizzle.config.ts"
+    "db:push": "drizzle-kit push --config drizzle.config.ts",
+    "test:migration:phase1": "vitest run tests/migration/phase1.test.ts",
+    "test:migration:phase2": "vitest run tests/migration/phase2.test.ts",
+    "test:migration:phase3": "vitest run tests/migration/phase3.test.ts",
+    "test:migration:phase4": "vitest run tests/migration/phase4.test.ts",
+    "test:migration:phase5": "vitest run tests/migration/phase5.test.ts",
+    "test:migration:phase6": "vitest run tests/migration/phase6.test.ts",
+    "test:migration:phase7": "vitest run tests/migration/phase7.test.ts",
+    "test:migration:phase8": "vitest run tests/migration/phase8.test.ts",
+    "test:migration:phase9": "playwright test tests/e2e/",
+    "test:migration:phase10": "vitest run tests/migration/phase10.test.ts",
+    "test:migration:all": "vitest run tests/migration/ && tsc --noEmit && playwright test tests/e2e/"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.4",
     "argon2": "^0.44.0",
     "cloudinary": "^2.9.0",
     "compression": "^1.8.1",
-    "connect-pg-simple": "^10.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "csrf-csrf": "^4.0.3",
@@ -35,7 +46,6 @@
     "nodemailer": "^8.0.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
-    "pg": "^8.18.0",
     "socket.io": "^4.8.3",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
@@ -44,8 +54,8 @@
     "zod-validation-error": "^5.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/compression": "^1.8.1",
-    "@types/connect-pg-simple": "^7.0.3",
     "@types/cookie": "^0.6.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/cookie-signature": "^1.1.2",
@@ -60,12 +70,16 @@
     "@types/nodemailer": "^7.0.9",
     "@types/passport": "^1.0.17",
     "@types/passport-google-oauth20": "^2.0.17",
-    "@types/pg": "^8.16.0",
+    "@types/pg": "^8.20.0",
     "@types/ws": "^8.5.13",
     "cross-env": "^10.1.0",
     "esbuild": "^0.25.0",
+    "glob": "^13.0.6",
+    "pg": "^8.22.0",
+    "socket.io-client": "^4.8.3",
     "tsx": "^4.20.5",
-    "typescript": "5.6.3"
+    "typescript": "5.6.3",
+    "vitest": "^4.1.9"
   },
   "overrides": {
     "drizzle-kit": {

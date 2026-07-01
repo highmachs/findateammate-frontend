@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { logger } from "./lib/logger";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { insertPostSchema, insertConnectionRequestSchema, insertMessageSchema, insertUserSchema, selectUserSchema, type AuditLog, type Analytics, User } from "@shared/schema";
+import { insertPostSchema, insertConnectionRequestSchema, insertMessageSchema, insertUserSchema, selectUserSchema, type AuditLog, type Analytics, User } from "@shared/schema.sqlite";
 import { SKILLS, DEPARTMENTS, COLLEGES } from "@shared/constants";
 import {
   registerForEvent,
@@ -21,7 +21,7 @@ import { uploadToCloudinary, deleteFromCloudinary } from "./lib/cloudinary";
 // express value unused, type Express imported above
 // import express from "express";
 import { db } from "./db";
-import { posts, users, analytics, postInteractions } from "@shared/schema";
+import { posts, users, analytics, postInteractions } from "@shared/schema.sqlite";
 import { maintenanceMiddleware } from "./middleware/maintenance";
 import { sql, eq, and, not, isNull, gt, inArray, desc } from "drizzle-orm";
 // passport unused here, moved to auth.ts
@@ -176,6 +176,39 @@ export async function registerRoutes(
   });
 
   // -- Authentication (Google OAuth ONLY) --
+  // Mock Auth Endpoint for E2E Tests
+  app.post("/api/auth/mock", async (req, res, next) => {
+    // Only allow in non-production or if explicitly testing
+    if (process.env.NODE_ENV === "production" && !process.env.ENABLE_MOCK_AUTH) {
+      return res.status(404).json({ message: "Not found" });
+    }
+    
+    try {
+      const mockUser = await storage.createOAuthUser({
+        name: "E2E Test User",
+        email: `e2e_${Date.now()}@test.com`,
+        username: `e2e_user_${Date.now()}`,
+        googleId: `mock_google_${Date.now()}`,
+        authProvider: 'google',
+        bio: '',
+        portfolio: '',
+        github: '',
+        department: 'CS',
+        city: 'Test City',
+        university: 'Test University',
+        skills: ['TypeScript']
+      });
+      
+      req.session.userId = mockUser.id;
+      req.session.save((err) => {
+        if (err) return next(err);
+        res.json(mockUser);
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.post("/api/logout", (req, res) => {
     req.session.destroy((err) => {
       // BUG #17 FIX: Log session destruction errors but continue clearing cookie
@@ -455,7 +488,7 @@ export async function registerRoutes(
         safeBody.interests = filterValidInterests(safeBody.interests);
       }
 
-      // Create partial schema for updates
+      // Create partial schema for patch
       const patchUserSchema = insertUserSchema.partial();
       const parsed = patchUserSchema.safeParse(safeBody);
       if (!parsed.success) return res.status(400).json(parsed.error);
@@ -2082,16 +2115,16 @@ export async function registerRoutes(
   app.get("/api/admin/stats", requireAdmin, async (_req, res, next) => {
     try {
       // PERFORMANCE FIX: Use database aggregation instead of loading all data into memory
-      const userCountResult = await db.execute(sql`SELECT COUNT(*) as count FROM ${users}`);
-      const postCountResult = await db.execute(sql`SELECT COUNT(*) as count FROM ${posts}`);
-      const eventCountResult = await db.execute(sql`SELECT COUNT(*) as count FROM ${posts} WHERE ${posts.eventName} IS NOT NULL`);
+      const userCountResult = await db.all(sql`SELECT COUNT(*) as count FROM ${users}`);
+      const postCountResult = await db.all(sql`SELECT COUNT(*) as count FROM ${posts}`);
+      const eventCountResult = await db.all(sql`SELECT COUNT(*) as count FROM ${posts} WHERE ${posts.eventName} IS NOT NULL`);
       
       // Reports Stats
-      const reportCountResult = await db.execute(sql`SELECT COUNT(*) as count FROM reports`);
-      const pendingReportCountResult = await db.execute(sql`SELECT COUNT(*) as count FROM reports WHERE status = 'pending'`);
+      const reportCountResult = await db.all(sql`SELECT COUNT(*) as count FROM reports`);
+      const pendingReportCountResult = await db.all(sql`SELECT COUNT(*) as count FROM reports WHERE status = 'pending'`);
 
       // Aggregate posts by date using SQL
-      const postsByDateResult = await db.execute(sql`
+      const postsByDateResult = await db.all(sql`
         SELECT DATE(${posts.createdAt}) as date, COUNT(*) as count
         FROM ${posts}
         GROUP BY DATE(${posts.createdAt})
@@ -2100,19 +2133,19 @@ export async function registerRoutes(
       `);
       
       const postsByDate: Record<string, number> = {};
-      postsByDateResult.rows.forEach((row: any) => {
+      postsByDateResult.forEach((row: any) => {
         postsByDate[row.date] = Number(row.count);
       });
 
       // Skills aggregation from JSONB array (unpack and count)
       const stats = {
-        totalUsers: Number((userCountResult.rows[0] as any).count),
-        totalPosts: Number((postCountResult.rows[0] as any).count),
-        totalEvents: Number((eventCountResult.rows[0] as any).count),
-        totalReports: Number((reportCountResult.rows[0] as any).count),
-        pendingReports: Number((pendingReportCountResult.rows[0] as any).count),
+        totalUsers: Number((userCountResult[0] as any).count),
+        totalPosts: Number((postCountResult[0] as any).count),
+        totalEvents: Number((eventCountResult[0] as any).count),
+        totalReports: Number((reportCountResult[0] as any).count),
+        pendingReports: Number((pendingReportCountResult[0] as any).count),
         postsByDate,
-        skills: await db.execute(sql`
+        skills: await db.all(sql`
           SELECT skill_item as name, COUNT(*) as count
           FROM ${users}, jsonb_array_elements_text(skills) as skill_item
           WHERE skills IS NOT NULL AND jsonb_array_length(skills) > 0
@@ -2121,7 +2154,7 @@ export async function registerRoutes(
           LIMIT 10
         `).then(res => {
           const skillsMap: Record<string, number> = {};
-          res.rows.forEach((row: any) => {
+          res.forEach((row: any) => {
             if (row.name) skillsMap[row.name] = Number(row.count);
           });
           return skillsMap;
@@ -2190,7 +2223,7 @@ export async function registerRoutes(
           return res.status(204).end();
         }
 
-        const { insertAnalyticsSchema } = await import("@shared/schema");
+        const { insertAnalyticsSchema } = await import("@shared/schema.sqlite");
         
         // Ensure timestamp is set
         const data = { ...req.body, timestamp: new Date() };
@@ -2344,7 +2377,7 @@ export async function registerRoutes(
 
   app.post("/api/observability/audit", requireAdmin, async (req, res) => {
     try {
-      const { insertAuditLogSchema } = await import("@shared/schema");
+      const { insertAuditLogSchema } = await import("@shared/schema.sqlite");
       const parsed = insertAuditLogSchema.safeParse(req.body);
       
       if (!parsed.success) {
@@ -2547,7 +2580,7 @@ export async function registerRoutes(
   // -- Report Routes --
   app.post("/api/reports", requireAuth, async (req, res, next) => {
     try {
-      const { insertReportSchema } = await import("@shared/schema");
+      const { insertReportSchema } = await import("@shared/schema.sqlite");
       const parsed = insertReportSchema.safeParse(req.body);
       
       if (!parsed.success) {
@@ -2681,7 +2714,7 @@ export async function registerRoutes(
   // -- Feedback Routes --
   app.post("/api/feedback", requireAuth, async (req, res, next) => {
     try {
-      const { insertFeedbackSchema } = await import("@shared/schema");
+      const { insertFeedbackSchema } = await import("@shared/schema.sqlite");
       // UI sends { feedback, rating }, which corresponds to schema's { comment, rating }
       const payload = { ...req.body, comment: req.body.feedback };
       const parsed = insertFeedbackSchema.safeParse(payload);
@@ -2800,7 +2833,7 @@ export async function registerRoutes(
       
       let featureUsageResult;
       if (whereConditions.length > 0) {
-        featureUsageResult = await db.execute(sql`
+        featureUsageResult = await db.all(sql`
           SELECT event as feature, COUNT(*) as usage 
           FROM ${analytics}
           WHERE ${whereConditions.reduce((a, b) => sql`${a} AND ${b}`)}
@@ -2808,7 +2841,7 @@ export async function registerRoutes(
           ORDER BY usage DESC
         `);
       } else {
-        featureUsageResult = await db.execute(sql`
+        featureUsageResult = await db.all(sql`
           SELECT event as feature, COUNT(*) as usage 
           FROM ${analytics}
           GROUP BY event
@@ -2816,91 +2849,91 @@ export async function registerRoutes(
         `);
       }
       
-      const featureUsage = featureUsageResult.rows.map((row: any) => ({
+      const featureUsage = featureUsageResult.map((row: any) => ({
         feature: row.feature,
         usage: Number(row.usage)
       }));
 
       // Calculate User Growth (users created per day, last 30 days)
-      const userGrowthResult = await db.execute(sql`
-        SELECT TO_CHAR(${users.createdAt}, 'YYYY-MM-DD') as date, COUNT(*) as count 
+      const userGrowthResult = await db.all(sql`
+        SELECT strftime('%Y-%m-%d', ${users.createdAt}, 'unixepoch') as date, COUNT(*) as count 
         FROM ${users} 
-        WHERE ${users.createdAt} > NOW() - INTERVAL '30 days'
-        GROUP BY TO_CHAR(${users.createdAt}, 'YYYY-MM-DD') 
+        WHERE ${users.createdAt} > unixepoch() - 30 * 86400
+        GROUP BY strftime('%Y-%m-%d', ${users.createdAt}, 'unixepoch') 
         ORDER BY date ASC
       `);
 
       // Calculate Engagement Metrics
       // DAU: Unique users with events in last 24h
-      const dauResult = await db.execute(sql`
+      const dauResult = await db.all(sql`
         SELECT COUNT(DISTINCT ${analytics.userId}) as count 
         FROM ${analytics} 
-        WHERE ${analytics.timestamp} > NOW() - INTERVAL '24 hours'
+        WHERE ${analytics.timestamp} > unixepoch() - 86400
       `);
 
       // MAU: Unique users with events in last 30 days
-      const mauResult = await db.execute(sql`
+      const mauResult = await db.all(sql`
         SELECT COUNT(DISTINCT ${analytics.userId}) as count 
         FROM ${analytics} 
-        WHERE ${analytics.timestamp} > NOW() - INTERVAL '30 days'
+        WHERE ${analytics.timestamp} > unixepoch() - 30 * 86400
       `);
 
       // FIX: Await these properly - IIFEs returning Promises caused React error #31
       // (Promise objects were being serialized into JSON and rendered in JSX)
       let avgSessionDuration = 0;
       try {
-        const sessionResult = await db.execute(sql`
+        const sessionResult = await db.all(sql`
           WITH UserSessions AS (
               SELECT 
                   ${analytics.userId}, 
-                  DATE(${analytics.timestamp}) as day,
-                  EXTRACT(EPOCH FROM (MAX(${analytics.timestamp}) - MIN(${analytics.timestamp}))) / 60 as duration_minutes
+                  date(${analytics.timestamp}, 'unixepoch') as day,
+                  (MAX(${analytics.timestamp}) - MIN(${analytics.timestamp})) / 60.0 as duration_minutes
               FROM ${analytics}
-              WHERE ${analytics.timestamp} > NOW() - INTERVAL '7 days'
+              WHERE ${analytics.timestamp} > unixepoch() - 7 * 86400
               AND ${analytics.userId} IS NOT NULL
-              GROUP BY ${analytics.userId}, DATE(${analytics.timestamp})
+              GROUP BY ${analytics.userId}, date(${analytics.timestamp}, 'unixepoch')
               HAVING COUNT(*) > 1
           )
-          SELECT COALESCE(ROUND(AVG(duration_minutes)::numeric, 1), 0) as avg_duration FROM UserSessions
+          SELECT COALESCE(ROUND(AVG(duration_minutes), 1), 0) as avg_duration FROM UserSessions
         `);
-        avgSessionDuration = Number(sessionResult.rows[0]?.avg_duration || 0);
+        avgSessionDuration = Number((sessionResult[0] as any)?.avg_duration || 0);
       } catch { avgSessionDuration = 0; }
 
       let retention7Day = 0;
       try {
-        const retentionResult = await db.execute(sql`
+        const retentionResult = await db.all(sql`
           WITH LastWeekUsers AS (
               SELECT DISTINCT ${analytics.userId} as uid
               FROM ${analytics}
-              WHERE ${analytics.timestamp} BETWEEN NOW() - INTERVAL '14 days' AND NOW() - INTERVAL '7 days'
+              WHERE ${analytics.timestamp} BETWEEN unixepoch() - 14 * 86400 AND unixepoch() - 7 * 86400
               AND ${analytics.userId} IS NOT NULL
           ),
           ThisWeekUsers AS (
               SELECT DISTINCT ${analytics.userId} as uid
               FROM ${analytics}
-              WHERE ${analytics.timestamp} > NOW() - INTERVAL '7 days'
+              WHERE ${analytics.timestamp} > unixepoch() - 7 * 86400
               AND ${analytics.userId} IS NOT NULL
           )
           SELECT 
               CASE 
                   WHEN (SELECT COUNT(*) FROM LastWeekUsers) = 0 THEN 0
                   ELSE ROUND(
-                      (SELECT COUNT(*) FROM LastWeekUsers JOIN ThisWeekUsers ON LastWeekUsers.uid = ThisWeekUsers.uid)::numeric / 
-                      (SELECT COUNT(*) FROM LastWeekUsers)::numeric * 100, 
+                      CAST((SELECT COUNT(*) FROM LastWeekUsers JOIN ThisWeekUsers ON LastWeekUsers.uid = ThisWeekUsers.uid) AS REAL) / 
+                      CAST((SELECT COUNT(*) FROM LastWeekUsers) AS REAL) * 100, 
                   1)
               END as retention
         `);
-        retention7Day = Number(retentionResult.rows[0]?.retention || 0);
+        retention7Day = Number((retentionResult[0] as any)?.retention || 0);
       } catch { retention7Day = 0; }
 
       const analyticsData = {
-        userGrowth: userGrowthResult.rows.map((row: any) => ({
+        userGrowth: userGrowthResult.map((row: any) => ({
           date: row.date,
           count: Number(row.count)
         })),
         engagementMetrics: {
-          dau: Number(dauResult.rows[0].count),
-          mau: Number(mauResult.rows[0].count),
+          dau: Number((dauResult[0] as any).count),
+          mau: Number((mauResult[0] as any).count),
           avgSessionDuration,
           retention7Day,
         },
@@ -3008,7 +3041,7 @@ export async function registerRoutes(
   // Health check endpoint for monitoring
   app.get("/health", async (_req, res) => {
     try {
-      await db.execute(sql`SELECT 1`);
+      await db.all(sql`SELECT 1`);
       res.json({ status: "ok", timestamp: new Date().toISOString(), db: "connected" });
     } catch (error) {
        logger.error("Health check failed", error);

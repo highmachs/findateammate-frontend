@@ -1,1 +1,0 @@
-CREATE INDEX IF NOT EXISTS "posts_rate_limit_idx" ON "posts" USING btree ("user_id","created_at");

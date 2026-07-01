@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { posts, postInteractions, userPreferences, userSearches, users, systemSettings } from "../../shared/schema";
+import { posts, postInteractions, userPreferences, userSearches, users, systemSettings } from "../../shared/schema.sqlite";
 import { eq, and, inArray, desc, gt, or, isNull, not, sql } from "drizzle-orm";
 
 interface PostScore {

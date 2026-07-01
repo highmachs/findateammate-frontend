@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { posts, messages, analytics, auditLogs, postInteractions, userSearches } from "@shared/schema";
+import { posts, messages, analytics, auditLogs, postInteractions, userSearches } from "@shared/schema.sqlite";
 import { lt, and, inArray, isNull, lte, isNotNull, sql } from "drizzle-orm";
 import { logger } from "./lib/logger";
 import cron from "node-cron";
@@ -36,7 +36,7 @@ export async function cleanupOldContent() {
       );
 
     // Second: Get event posts past their event date
-    // Use sql`NOW()` to let PostgreSQL handle timezone, not JS Date
+    // Use sql`unixepoch()` to let SQLite handle timezone, not JS Date
     const oldEventPosts = await db
       .select({ id: posts.id, eventImage: posts.eventImage })
       .from(posts)
@@ -44,7 +44,7 @@ export async function cleanupOldContent() {
         and(
           isNotNull(posts.eventName),
           isNotNull(posts.eventDate),
-          lte(posts.eventDate, sql`NOW()`)
+          lte(posts.eventDate, sql`unixepoch()`)
         )
       );
 

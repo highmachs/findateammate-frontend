@@ -1,4 +1,4 @@
-import { users, posts, connectionRequests, messages, analytics, notifications, eventVotes, reports, systemSettings, auditLogs, feedback, eventRegistrations, postInteractions, userSearches, type User, type InsertUser, type Post, type InsertPost, type ConnectionRequest, type InsertConnectionRequest, type EventRegistration, type InsertEventRegistration, type Message, type InsertMessage, type Notification, type InsertNotification, type Analytics, type InsertAnalytics, type ChatWithDetails, type Report, type InsertReport, type SystemSetting, type AuditLog, type InsertAuditLog, type Feedback, type InsertFeedback } from "@shared/schema";
+import { users, posts, connectionRequests, messages, analytics, notifications, eventVotes, reports, systemSettings, auditLogs, feedback, eventRegistrations, postInteractions, userSearches, type User, type InsertUser, type Post, type InsertPost, type ConnectionRequest, type InsertConnectionRequest, type EventRegistration, type InsertEventRegistration, type Message, type InsertMessage, type Notification, type InsertNotification, type Analytics, type InsertAnalytics, type ChatWithDetails, type Report, type InsertReport, type SystemSetting, type AuditLog, type InsertAuditLog, type Feedback, type InsertFeedback } from "../shared/schema.sqlite";
 import { db } from "./db";
 import { logger } from "./lib/logger";
 import { MemoryCache } from "./lib/cache";
@@ -583,15 +583,17 @@ export class DatabaseStorage implements IStorage {
       
       // 2. Optimization: Batch fetch last messages using DISTINCT ON (Postgres specific)
       // We fetch the most recent message for each chat directly in one query.
-      const lastMessagesResult = await db.execute(sql`
-        SELECT DISTINCT ON (${messages.chatId}) *
-        FROM ${messages}
-        WHERE ${inArray(messages.chatId, chatIds)}
-        ORDER BY ${messages.chatId}, ${messages.timestamp} DESC
+      const lastMessagesResult = await db.all(sql`
+        WITH RankedMessages AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY ${messages.chatId} ORDER BY ${messages.timestamp} DESC) as rn
+          FROM ${messages}
+          WHERE ${inArray(messages.chatId, chatIds)}
+        )
+        SELECT * FROM RankedMessages WHERE rn = 1
       `);
       
       const lastMessagesMap = new Map();
-      lastMessagesResult.rows.forEach((msg: any) => {
+      lastMessagesResult.forEach((msg: any) => {
         lastMessagesMap.set(msg.chat_id, msg);
       });
 
@@ -840,7 +842,7 @@ export class DatabaseStorage implements IStorage {
 
       // Delete notifications SENT by this user (where metadata->senderId = id)
       await tx.delete(notifications).where(
-        sql`metadata->>'senderId' = ${id}`
+        sql`json_extract(metadata, '$.senderId') = ${id}`
       );
       
       await tx.delete(users).where(eq(users.id, id));
@@ -1275,12 +1277,12 @@ export class DatabaseStorage implements IStorage {
         total: sql<number>`COUNT(*)`,
       })
       .from(postInteractions)
-      .where(sql`${postInteractions.createdAt} > NOW() - (${safeDays} * INTERVAL '1 day')`);
+      .where(sql`${postInteractions.createdAt} > unixepoch() - (${safeDays} * 86400)`);
 
     const [searchAgg] = await db
       .select({ total: sql<number>`COUNT(*)` })
       .from(userSearches)
-      .where(sql`${userSearches.createdAt} > NOW() - (${safeDays} * INTERVAL '1 day')`);
+      .where(sql`${userSearches.createdAt} > unixepoch() - (${safeDays} * 86400)`);
 
     const views = Number(interactionAgg?.views || 0);
     const clicks = Number(interactionAgg?.clicks || 0);

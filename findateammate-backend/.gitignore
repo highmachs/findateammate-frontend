@@ -34,3 +34,8 @@ renderenvcontent.env
 # Uploads
 uploads/*
 !uploads/.gitkeep
+local.db  
+local.db-shm  
+local.db-wal  
+playwright-report/  
+test-results/  
