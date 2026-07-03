@@ -1,0 +1,12 @@
+const fs = require('fs');
+let c = fs.readFileSync('lib/storage.ts', 'utf8');
+c = c.replace(/this\.userCache\.get/g, 'await this.userCache.get');
+c = c.replace(/this\.userCache\.set/g, 'await this.userCache.set');
+c = c.replace(/this\.userCache\.delete/g, 'await this.userCache.delete');
+c = c.replace(/this\.postCache\.get/g, 'await this.postCache.get');
+c = c.replace(/this\.postCache\.set/g, 'await this.postCache.set');
+c = c.replace(/this\.postCache\.delete/g, 'await this.postCache.delete');
+c = c.replace(/this\.adminStatsCache\.get/g, 'await this.adminStatsCache.get');
+c = c.replace(/this\.adminStatsCache\.set/g, 'await this.adminStatsCache.set');
+c = c.replace(/this\.adminStatsCache\.delete/g, 'await this.adminStatsCache.delete');
+fs.writeFileSync('lib/storage.ts', c);

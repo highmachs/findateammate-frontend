@@ -1,0 +1,23 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+
+# Disallow private pages
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /chat
+Disallow: /chat/
+Disallow: /requests
+Disallow: /requests/
+Disallow: /notifications
+Disallow: /notifications/
+Disallow: /profile/edit
+Disallow: /profile/edit/
+Disallow: /my-posts
+Disallow: /my-posts/
+Disallow: /settings
+Disallow: /settings/
+
+# Sitemap
+Sitemap: https://findateammate.online/sitemap.xml

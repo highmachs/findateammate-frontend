@@ -1,0 +1,9 @@
+{
+  "name": "findateammate",
+  "main": "party/chat.ts",
+  "parties": {
+    "global": "party/global.ts",
+    "notifications": "party/notifications.ts",
+    "chat": "party/chat.ts"
+  }
+}
