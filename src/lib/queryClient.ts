@@ -26,7 +26,8 @@ function buildApiUrl(path: string): string {
 
 // Keep empty by default so same-origin requests use Vercel rewrites.
 // This preserves session cookies and avoids cross-origin CORS issues.
-export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
+// On Vercel, the API and frontend share the same origin, so API_BASE_URL is empty.
+export const API_BASE_URL: string = "";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {

@@ -32,11 +32,11 @@ export class ChatRoom extends Server {
     const chatId = this.name; // room name = chatId
 
     // Validate that this user is actually a participant in this chat
-    const apiUrl = this.env.VERCEL_API_URL as string || "";
+    const apiUrl = (this as any).env.VERCEL_API_URL as string || "";
     try {
       const checkRes = await fetch(`${apiUrl}/api/chats/${chatId}/check-participant`, {
         headers: {
-          "x-partykit-secret": this.env.PARTYKIT_SECRET as string,
+          "x-partykit-secret": (this as any).env.PARTYKIT_SECRET as string,
           "x-user-id": userId,
         },
       });
@@ -77,13 +77,13 @@ export class ChatRoom extends Server {
         return;
       }
 
-      const apiUrl = this.env.VERCEL_API_URL as string || "";
+      const apiUrl = (this as any).env.VERCEL_API_URL as string || "";
       try {
         const saveRes = await fetch(`${apiUrl}/api/chats/${this.name}/messages`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-partykit-secret": this.env.PARTYKIT_SECRET as string,
+            "x-partykit-secret": (this as any).env.PARTYKIT_SECRET as string,
             "x-user-id": userId,
           },
           body: JSON.stringify({ content: content.trim() }),
@@ -117,7 +117,7 @@ export class ChatRoom extends Server {
   // HTTP endpoint: Vercel API posts messages here for broadcast
   async onRequest(request: Request): Promise<Response> {
     const secret = request.headers.get("x-partykit-secret");
-    if (secret !== (this.env.PARTYKIT_SECRET as string)) {
+    if (secret !== ((this as any).env.PARTYKIT_SECRET as string)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
     }
     const body = await request.json() as any;

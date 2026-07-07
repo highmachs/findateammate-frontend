@@ -73,28 +73,39 @@ export default function Chat({ params }: ChatProps) {
             return;
         }
         
-        const socket = connectSocket(chatId);
-        setSocketConnected(socket.readyState === 1);
+        let socket: any;
 
-        const onOpen = () => setSocketConnected(true);
-        const onClose = () => setSocketConnected(false);
-        const onError = (evt: any) => {
-            toast({
-                title: "Chat Join Error",
-                description: "Failed to connect to real-time server.",
-                variant: "destructive"
-            });
-            logger.error("[Chat] Socket error", evt);
-            setSocketConnected(false);
+        const setupSocket = async () => {
+            socket = await connectSocket(chatId);
+            setSocketConnected(socket.readyState === 1);
+
+            const onOpen = () => setSocketConnected(true);
+            const onClose = () => setSocketConnected(false);
+            const onError = (evt: any) => {
+                toast({
+                    title: "Chat Join Error",
+                    description: "Failed to connect to real-time server.",
+                    variant: "destructive"
+                });
+                logger.error("[Chat] Socket error", evt);
+                setSocketConnected(false);
+            };
+            socket.addEventListener("open", onOpen);
+            socket.addEventListener("close", onClose);
+            socket.addEventListener("error", onError);
+
+            return () => {
+                socket.removeEventListener("open", onOpen);
+                socket.removeEventListener("close", onClose);
+                socket.removeEventListener("error", onError);
+            };
         };
-        socket.addEventListener("open", onOpen);
-        socket.addEventListener("close", onClose);
-        socket.addEventListener("error", onError);
+
+        let cleanupFn: (() => void) | void;
+        setupSocket().then(fn => { cleanupFn = fn; });
 
         return () => {
-            socket.removeEventListener("open", onOpen);
-            socket.removeEventListener("close", onClose);
-            socket.removeEventListener("error", onError);
+            if (cleanupFn) cleanupFn();
         };
     }, [chatId, toast]);
 

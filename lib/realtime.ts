@@ -47,6 +47,6 @@ export async function emitMessage(chatId: string, enrichedMessage: object): Prom
 }
 
 /** Replaces: io.emit("maintenance_update", value) */
-export async function emitMaintenance(value: boolean): Promise<void> {
+export async function emitMaintenance(value: any): Promise<void> {
   await publishToRoom("global", "global", { type: "maintenance_update", value });
 }

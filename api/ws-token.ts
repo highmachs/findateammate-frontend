@@ -1,11 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import jwt from "jsonwebtoken";
-import { withSession } from "../lib/middleware";
+import { bootstrap } from "../lib/middleware";
 
 const WS_JWT_SECRET = process.env.WS_JWT_SECRET!;
 const WS_JWT_EXPIRES_IN = "8h"; // Long enough for a full session
 
-export default withSession(async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!(await bootstrap(req, res))) return;
+
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -32,4 +34,4 @@ export default withSession(async function handler(req: VercelRequest, res: Verce
   // Short cache — token is valid 8h but we don't want stale banned-user tokens
   res.setHeader("Cache-Control", "private, no-store");
   return res.status(200).json({ token });
-});
+}

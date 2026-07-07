@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { db } from "../../../lib/db";
-import { chats } from "@shared/schema.sqlite";
+import { connectionRequests as chats } from "@shared/schema.sqlite";
 import { eq } from "drizzle-orm";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -24,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!chat) return res.status(404).json({ error: "Chat not found" });
 
-  const isParticipant = chat.user1Id === userId || chat.user2Id === userId;
+  const isParticipant = chat.fromUserId === userId || chat.toUserId === userId;
   if (!isParticipant) return res.status(403).json({ error: "Not a participant" });
 
   return res.status(200).json({ ok: true });

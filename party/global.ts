@@ -18,18 +18,18 @@ export class GlobalRoom extends Server {
     }
 
     // Send current maintenance state on connect
-    const currentState = await this.storage.get<boolean>("maintenance") ?? false;
+    const currentState = ((await (this as any).storage.get("maintenance")) as boolean) ?? false;
     conn.send(JSON.stringify({ type: "maintenance_update", value: currentState }));
   }
 
   // Vercel API pushes maintenance state changes here
   async onRequest(request: Request): Promise<Response> {
     const secret = request.headers.get("x-partykit-secret");
-    if (secret !== (this.env.PARTYKIT_SECRET as string)) {
+    if (secret !== ((this as any).env.PARTYKIT_SECRET as string)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
     }
     const { value } = await request.json() as { value: boolean };
-    await this.storage.put("maintenance", value);
+    await (this as any).storage.put("maintenance", value);
     this.broadcast(JSON.stringify({ type: "maintenance_update", value }));
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   }

@@ -18,7 +18,7 @@ export const sessionMiddleware = session({
     secure: isProduction,
     httpOnly: true,
     maxAge: 3 * 24 * 60 * 60 * 1000, // 3 days
-    sameSite: isProduction ? "none" : "lax",
+    sameSite: "lax",
   },
 });
 
@@ -30,7 +30,7 @@ const {
   getSecret: () => process.env.CSRF_SECRET || "dev-csrf-secret-change-in-prod",
   cookieName: "x-csrf-token",
   cookieOptions: {
-    sameSite: isProduction ? "none" : "lax",
+    sameSite: "lax",
     path: "/",
     secure: isProduction,
     httpOnly: false,

@@ -8,7 +8,7 @@ export class NotificationRoom extends Server {
 
     // Allow publisher connections from Vercel API (secret header, no token)
     const secret = ctx.request.headers.get("x-partykit-secret");
-    if (secret && secret === (this.env.PARTYKIT_SECRET as string)) {
+    if (secret && secret === ((this as any).env.PARTYKIT_SECRET as string)) {
       return; // Authorized publisher
     }
 
@@ -36,7 +36,7 @@ export class NotificationRoom extends Server {
   // Vercel API calls this room's HTTP endpoint to push events to the user
   async onRequest(request: Request): Promise<Response> {
     const secret = request.headers.get("x-partykit-secret");
-    if (secret !== (this.env.PARTYKIT_SECRET as string)) {
+    if (secret !== ((this as any).env.PARTYKIT_SECRET as string)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
     }
 

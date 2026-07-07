@@ -109,10 +109,10 @@ export async function connectSocket(chatId?: string): Promise<any> {
 
     // Wrap PartySocket to mimic Socket.IO's .on()/.off()/.emit() API
     // so Chat.tsx and GlobalListener.tsx compile without any changes
-    return createSocketIOCompatWrapper(chatSocket, chatId);
+    return createSocketIOCompatWrapper(chatSocket, chatId || null);
   }
 
-  return createSocketIOCompatWrapper(chatSocket, chatId);
+  return createSocketIOCompatWrapper(chatSocket, chatId || null);
 }
 
 export function getSocket(): any {

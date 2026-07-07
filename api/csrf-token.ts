@@ -9,6 +9,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.setHeader("Set-Cookie", str);
     };
   }
-  const token = generateCsrfToken(req as any, res as any);
+  const token = generateCsrfToken();
   res.status(200).json({ csrfToken: token });
 }

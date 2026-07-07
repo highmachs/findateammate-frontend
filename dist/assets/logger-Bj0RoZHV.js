@@ -1,1 +1,0 @@
-import{Q as e}from"./index-CKzaBGfG.js";const o={log:(...s)=>{},warn:(s,...a)=>{e("app_warning",{message:s,details:a})},error:(s,a,...t)=>{const r={message:s,error:a instanceof Error?{name:a.name,message:a.message,stack:a.stack}:a,details:t};e("app_error",r)}};export{o as l};

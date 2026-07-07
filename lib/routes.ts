@@ -224,7 +224,7 @@ export function registerRoutes() {
       const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true";
       res.clearCookie("connect.sid", {
         path: "/",
-        sameSite: isProduction ? "none" : "lax",
+        sameSite: "lax",
         secure: isProduction,
         httpOnly: true,
       });
