@@ -5,8 +5,7 @@ import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { Message } from "@shared/schema";
 import { useAnalytics } from "@/hooks/use-analytics";
-import PartySocket from "partysocket";
-
+import { connectSocket, disconnectSocket, getSocket, connectNotificationSocket, getNotificationSocket, connectGlobalSocket, getGlobalSocket } from "@/lib/socket";
 export function GlobalListener() {
     const { chats, addMessage, fetchChats, fetchNotifications } = useStore();
     const { user } = useAuth();
@@ -44,15 +43,17 @@ export function GlobalListener() {
 
     useEffect(() => {
         if (user?.id) {
-            const socket = new PartySocket({
-                host: import.meta.env.VITE_PARTYKIT_HOST || "localhost:1999",
-                party: "notifications",
-                room: user.id
-            });
             const userId = user.id;
 
+            // Connect chat socket (for general presence, if needed)
+            const socket = connectSocket();
+            
+            // Connect notification and global sockets alongside chat socket
+            connectNotificationSocket(userId);
+            connectGlobalSocket();
+
             const handleOpen = () => {
-                console.log("[GlobalListener] Socket connected!");
+                console.log("[GlobalListener] Chat socket connected!");
                 stopPollingFallback();
                 useStore.getState().retryPendingMessages().catch(err => 
                     console.error("Failed to retry pending messages", err)
@@ -64,8 +65,8 @@ export function GlobalListener() {
                 startPollingFallback(userId);
             };
 
-            const handleError = (error: Event) => {
-                console.error("[GlobalListener] Socket connection error:", error);
+            const handleError = () => {
+                console.error("[GlobalListener] Socket connection error");
                 startPollingFallback(userId);
                 if (!hasShownFallbackToastRef.current) {
                     hasShownFallbackToastRef.current = true;
@@ -77,44 +78,89 @@ export function GlobalListener() {
                 }
             };
 
-            const handleMessage = (evt: MessageEvent) => {
+            const handleMessage = (data: any) => {
                 try {
-                    const data = JSON.parse(evt.data);
-                    
-                    if (data.type === "receive_message") {
-                        const message: Message = data.message;
+                    if (data?.type === "receive_message") {
+                        const message: Message = data;
                         addMessage(message.chatId, message);
                         const isOnChatPage = locationRef.current.startsWith(`/chat/${message.chatId}`);
                         if (!isOnChatPage) {
                             toast({ title: `New message`, description: message.text });
                         }
-                    } else if (data.type === "notification") {
-                        console.log("[GlobalListener] Received new notification signal!");
-                        fetchNotifications();
-                        if (userId) useStore.getState().fetchRequests(userId);
-                    } else if (data.type === "chat_updated") {
-                        fetchChats(userId);
                     }
                 } catch (e) {
                     console.error("Failed to parse GlobalListener message", e);
                 }
             };
 
-            socket.addEventListener("open", handleOpen);
-            socket.addEventListener("close", handleClose);
-            socket.addEventListener("error", handleError);
-            socket.addEventListener("message", handleMessage);
+            // Hook up chat socket listeners (Socket.IO compat wrapper)
+            const currentSocket = getSocket();
+            if (currentSocket) {
+                currentSocket.on("connect", handleOpen);
+                currentSocket.on("disconnect", handleClose);
+                currentSocket.on("connect_error", handleError);
+                currentSocket.on("receive_message", (data: any) => handleMessage({ type: "receive_message", ...data }));
+            }
+
+            // Inside the useEffect that runs on user?.id, after socket setup:
+            const notifSocket = getNotificationSocket();
+            if (notifSocket) {
+                const notifHandler = (evt: MessageEvent) => {
+                    try {
+                        const data = JSON.parse(evt.data);
+                        if (data.type === "notification") {
+                            console.log("[GlobalListener] Received new notification signal!");
+                            fetchNotifications();
+                            if (userId) useStore.getState().fetchRequests(userId);
+                        } else if (data.type === "chat_updated") {
+                            fetchChats(userId);
+                        }
+                    } catch {}
+                };
+                notifSocket.addEventListener("message", notifHandler);
+                
+                // Store handler for cleanup
+                (notifSocket as any)._notifHandler = notifHandler;
+            }
+
+            const globalSock = getGlobalSocket();
+            if (globalSock) {
+                const globalHandler = (evt: MessageEvent) => {
+                    try {
+                        const data = JSON.parse(evt.data);
+                        if (data.type === "maintenance_update") {
+                            window.dispatchEvent(new CustomEvent("maintenance_update", { detail: { value: data.value } }));
+                        }
+                    } catch {}
+                };
+                globalSock.addEventListener("message", globalHandler);
+                (globalSock as any)._globalHandler = globalHandler;
+            }
 
             return () => {
-                socket.removeEventListener("open", handleOpen);
-                socket.removeEventListener("close", handleClose);
-                socket.removeEventListener("error", handleError);
-                socket.removeEventListener("message", handleMessage);
-                socket.close();
+                const currentSocket = getSocket();
+                if (currentSocket) {
+                    currentSocket.off("connect", handleOpen);
+                    currentSocket.off("disconnect", handleClose);
+                    currentSocket.off("connect_error", handleError);
+                    // note: we don't call disconnectSocket() here because we want sockets to persist across route changes
+                }
+                
+                const notif = getNotificationSocket();
+                if (notif && (notif as any)._notifHandler) {
+                    notif.removeEventListener("message", (notif as any)._notifHandler);
+                }
+                
+                const glob = getGlobalSocket();
+                if (glob && (glob as any)._globalHandler) {
+                    glob.removeEventListener("message", (glob as any)._globalHandler);
+                }
+                
                 stopPollingFallback();
             };
         } else {
             stopPollingFallback();
+            disconnectSocket();
         }
     }, [user?.id, addMessage, toast, fetchNotifications, fetchChats]);
 

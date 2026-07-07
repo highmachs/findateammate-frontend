@@ -3,7 +3,7 @@ export const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
 
-import { broadcastToParty } from "./party-client";
+import { emitNotification, emitChatUpdated, emitMessage, emitMaintenance } from "./realtime";
 
 import { logger } from "./logger";
 
@@ -427,11 +427,8 @@ export function registerRoutes() {
             details: { enabled, mode, message, eta }
         });
 
-        // Broadscast change via Socket.IO if needed
-        const io = app.get('io');
-        if (io) {
-            io.emit('maintenance_update', value);
-        }
+        // Broadcast change via PartyKit HTTP API
+        await emitMaintenance(value);
         
         res.json(setting.value);
     } catch (error) {
@@ -1609,7 +1606,7 @@ export function registerRoutes() {
       });
 
       // Emit event via PartyKit
-      await broadcastToParty(parsed.data.toUserId, 'notification', { requestId: request.id, fromUserName: req.user!.name });
+      await emitNotification(parsed.data.toUserId, { requestId: request.id, fromUserName: req.user!.name });
 
       res.json(request);
     } catch (error) {
@@ -1649,10 +1646,8 @@ export function registerRoutes() {
       });
 
       // Signal chat creation/update to both parties via PartyKit
-      await broadcastToParty(request.fromUserId, 'chat_updated', { chatId: requestId });
-      await broadcastToParty(request.toUserId, 'chat_updated', { chatId: requestId });
-      // Also signal notification
-      await broadcastToParty(request.fromUserId, 'notification');
+      await emitChatUpdated([request.fromUserId, request.toUserId], requestId);
+      await emitNotification(request.fromUserId);
 
       res.json({ success: true });
     } catch (error) {
@@ -1839,7 +1834,7 @@ export function registerRoutes() {
         ...message,
         senderName: sender?.name || "Unknown"
       };
-      await broadcastToParty(chatId, 'receive_message', enrichedMessage);
+      await emitMessage(chatId, enrichedMessage);
       
       res.json(message);
     } catch (error) {

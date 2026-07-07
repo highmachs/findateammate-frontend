@@ -1,0 +1,20 @@
+{
+  "name": "findateammate-ws",
+  "main": "party/worker.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "ChatRoom", "class_name": "ChatRoom" },
+      { "name": "NotificationRoom", "class_name": "NotificationRoom" },
+      { "name": "GlobalRoom", "class_name": "GlobalRoom" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChatRoom", "NotificationRoom", "GlobalRoom"]
+    }
+  ],
+  "vars": {}
+}

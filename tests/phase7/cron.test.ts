@@ -26,7 +26,7 @@ describe("Phase 7: Cron job migration", () => {
     const offenders: string[] = [];
     for (const dir of dirs) {
       const dirPath = path.join(ROOT, dir);
-      const files = scanAll(dirPath).catch?.() ?? [];
+      const files = scanAll(dirPath);
       for (const f of files) {
         if (readFileSync(f, "utf-8").includes("node-cron")) {
           offenders.push(f);

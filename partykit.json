@@ -2,8 +2,11 @@
   "name": "findateammate",
   "main": "party/chat.ts",
   "parties": {
-    "global": "party/global.ts",
     "notifications": "party/notifications.ts",
-    "chat": "party/chat.ts"
+    "global": "party/global.ts"
+  },
+  "compatibilityDate": "2024-12-01",
+  "serve": {
+    "port": 1999
   }
 }
