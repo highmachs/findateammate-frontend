@@ -82,4 +82,48 @@ passport.deserializeUser(async (id: string, done) => {
   }
 });
 
+authApp.get("/google", passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+authApp.get("/google/callback", 
+  passport.authenticate('google', { failureRedirect: '/login?error=oauth_failed' }),
+  async (req: any, res: any) => {
+    // Save user data BEFORE session.regenerate() wipes req.user
+    const userBeforeRegen = req.user as any;
+
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((err: any) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      req.login(userBeforeRegen, (err: any) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Frontend URL in Vercel is just the current origin, so we can use relative paths
+    // or process.env.FRONTEND_URL if set. Since Vercel serves frontend and backend on the same domain,
+    // relative paths are best.
+    const frontendUrl = process.env.FRONTEND_URL || '';
+    const hasSkills = Array.isArray(userBeforeRegen?.skills) && userBeforeRegen.skills.length > 0;
+    const hasCity = Boolean((userBeforeRegen?.city || "").trim());
+    const hasUniversity = Boolean((userBeforeRegen?.university || "").trim());
+    const normalizedDepartment = String(userBeforeRegen?.department || "").trim().toUpperCase();
+    const hasDepartment =
+      normalizedDepartment.length > 0 &&
+      normalizedDepartment !== "OTHER";
+    const isNewUser =
+      userBeforeRegen?.isNewUser ||
+      !(hasSkills && hasCity && hasUniversity && hasDepartment);
+    
+    if (isNewUser) {
+      return res.redirect(`${frontendUrl}/onboarding`);
+    }
+    res.redirect(`${frontendUrl}/`);
+  }
+);
+
 export { authApp, passport };

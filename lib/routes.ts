@@ -28,6 +28,7 @@ import { uploadToCloudinary, deleteFromCloudinary } from "./cloudinary";
 // express value unused, type Express imported above
 // import express from "express";
 import { db } from "./db";
+import { authApp } from "./auth";
 import { authLocalRouter } from "./routes/auth-local";
 import { internalRouter } from "./routes/internal";
 import { websocketsRouter } from "./routes/websockets";
@@ -181,7 +182,8 @@ export function registerRoutes() {
   });
 
   // Vercel Serverless Function replacements
-  app.use("/api/auth", authLocalRouter);
+  app.use("/api/auth", authApp); // Mount Google OAuth (authApp)
+  app.use("/api/auth", authLocalRouter); // Mount Local Auth
   app.use("/api/internal", internalRouter);
   app.use("/api", websocketsRouter);
   app.use("/api", securityRouter);
