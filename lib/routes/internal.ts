@@ -1,16 +1,33 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { runWeeklyAuditExport } from "../../lib/audit-scheduler";
-import { sessionStore } from "../../lib/session";
-import { cleanupOldContent, cleanupObservabilityLogs } from "../../lib/cleanup-helpers";
-import { logger } from "../../lib/logger";
+import { Router } from "express";
+import { runWeeklyAuditExport } from "../audit-scheduler";
+import { sessionStore } from "../session";
+import { cleanupOldContent, cleanupObservabilityLogs } from "../cleanup-helpers";
+import { logger } from "../logger";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export const internalRouter = Router();
+
+internalRouter.get("/run-audit-export", async (req: any, res: any) => {
+  const secret = req.headers["x-cron-secret"];
+  if (secret !== process.env.CRON_SECRET) {
+    logger.warn(`Unauthorized cron attempt: invalid CRON_SECRET`);
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  try {
+    await runWeeklyAuditExport();
+    return res.status(200).json({ ok: true, message: "Weekly audit export completed" });
+  } catch (err: any) {
+    logger.error("[audit-export-route] failed:", err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+internalRouter.use("/daily-cleanup", async (req: any, res: any) => {
   if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).json({ message: "Method Not Allowed" });
   }
 
   const authHeader = req.headers["x-cron-secret"];
-  // For Vercel Cron, the secret is provided. Allow bypass if not configured in local dev, but enforce otherwise.
   if (process.env.CRON_SECRET && authHeader !== process.env.CRON_SECRET) {
     return res.status(401).json({ message: "Unauthorized" });
   }
@@ -18,7 +35,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   logger.log("Running daily cleanup jobs");
   const jobs: Array<{ name: string; status: string; error?: string }> = [];
 
-  // Job 1: audit export
   try {
     await runWeeklyAuditExport();
     jobs.push({ name: "audit", status: "success" });
@@ -27,7 +43,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     jobs.push({ name: "audit", status: "error", error: err.message });
   }
 
-  // Job 2: session-prune
   try {
     await sessionStore.prune();
     jobs.push({ name: "session-prune", status: "success" });
@@ -36,10 +51,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     jobs.push({ name: "session-prune", status: "error", error: err.message });
   }
 
-  // Job 3: cleanup (content/messages)
   try {
     await cleanupOldContent();
-    await cleanupObservabilityLogs(); // might as well run this too
+    await cleanupObservabilityLogs();
     jobs.push({ name: "cleanup", status: "success" });
   } catch (err: any) {
     logger.error("Cleanup failed", err);
@@ -47,4 +61,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   return res.status(200).json({ success: true, jobs });
-}
+});

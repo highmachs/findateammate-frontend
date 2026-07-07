@@ -28,6 +28,10 @@ import { uploadToCloudinary, deleteFromCloudinary } from "./cloudinary";
 // express value unused, type Express imported above
 // import express from "express";
 import { db } from "./db";
+import { authLocalRouter } from "./routes/auth-local";
+import { internalRouter } from "./routes/internal";
+import { websocketsRouter } from "./routes/websockets";
+import { securityRouter } from "./routes/security";
 import { posts, users, analytics, postInteractions } from "@shared/schema.sqlite";
 import { maintenanceMiddleware } from "./middleware/maintenance";
 import { sql, eq, and, not, isNull, gt, inArray, desc } from "drizzle-orm";
@@ -175,6 +179,12 @@ export function registerRoutes() {
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
   });
+
+  // Vercel Serverless Function replacements
+  app.use("/api/auth", authLocalRouter);
+  app.use("/api/internal", internalRouter);
+  app.use("/api", websocketsRouter);
+  app.use("/api", securityRouter);
 
   // -- Authentication (Google OAuth ONLY) --
   // Mock Auth Endpoint for E2E Tests
