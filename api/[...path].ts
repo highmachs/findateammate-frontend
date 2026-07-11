@@ -5,14 +5,14 @@ let bootstrapFn: any = null;
 async function initialize() {
   if (isInitialized) return;
   
-  // Dynamically import routes and register them
-  const { registerRoutes, app } = await import("../lib/routes");
+  // Use explicit .js extension to avoid ESM directory import conflicts
+  const { registerRoutes, app } = await import("../lib/routes.js");
   registerRoutes();
   
   const serverless = (await import("serverless-http")).default;
   handler = serverless(app, { binary: [] });
   
-  const { bootstrap } = await import("../lib/middleware");
+  const { bootstrap } = await import("../lib/middleware.js");
   bootstrapFn = bootstrap;
   
   isInitialized = true;
