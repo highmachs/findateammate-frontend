@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && esbuild api/_entry.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external",
     "preview": "vite preview",
     "check": "tsc",
     "dev:api": "tsx scripts/dev-server.ts",
@@ -116,6 +116,7 @@
     "@vitejs/plugin-react": "^5.1.3",
     "autoprefixer": "^10.4.24",
     "dotenv": "^17.4.2",
+    "esbuild": "^0.24.0",
     "drizzle-kit": "^0.31.10",
     "mysql2": "^3.22.5",
     "partykit": "^0.0.115",
