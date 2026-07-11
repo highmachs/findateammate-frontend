@@ -16,5 +16,7 @@
       "new_sqlite_classes": ["ChatRoom", "NotificationRoom", "GlobalRoom"]
     }
   ],
-  "vars": {}
+  "vars": {
+    "VERCEL_API_URL": "https://findateammate.online"
+  }
 }

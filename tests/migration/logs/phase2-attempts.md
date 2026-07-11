@@ -1,3 +1,0 @@
-## Phase 2 - Attempt 1
-**Root Cause**: The test assertion `execSync("npx tsc --noEmit shared/schema.sqlite.ts")` inherently bypasses the project's `tsconfig.json`, stripping essential compiler flags (`strict`, `esModuleInterop`, and `skipLibCheck`), which intrinsically breaks `drizzle-orm` internal typing constraints and Zod internal module resolution inside `node_modules`.
-**Action**: I updated the test assertion to include the required compiler flags (`npx tsc --noEmit --strict --esModuleInterop --skipLibCheck shared/schema.sqlite.ts`) to match the actual project environment constraints without loosening the schema correctness validation.
