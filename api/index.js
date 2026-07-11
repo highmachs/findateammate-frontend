@@ -19,48 +19,6 @@ var __copyProps = (to, from, except, desc4) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// lib/realtime.ts
-async function publishToRoom(party, roomId, payload) {
-  const url = `https://${PARTYKIT_HOST}/parties/${party}/${roomId}`;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-partykit-secret": PARTYKIT_SECRET
-      },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      console.error(`[Realtime] Failed to publish to ${party}/${roomId}: ${res.status}`);
-    }
-  } catch (err) {
-    console.error(`[Realtime] Network error publishing to ${party}/${roomId}:`, err);
-  }
-}
-async function emitNotification(userId, payload) {
-  await publishToRoom("notifications", userId, { type: "notification", ...payload ?? {} });
-}
-async function emitChatUpdated(userIds, chatId) {
-  await Promise.all(
-    userIds.map((uid) => publishToRoom("notifications", uid, { type: "chat_updated", chatId }))
-  );
-}
-async function emitMessage(chatId, enrichedMessage) {
-  await publishToRoom("chat", chatId, { type: "receive_message", ...enrichedMessage });
-}
-async function emitMaintenance(value) {
-  await publishToRoom("global", "global", { type: "maintenance_update", value });
-}
-var PARTYKIT_HOST, PARTYKIT_SECRET;
-var init_realtime = __esm({
-  "lib/realtime.ts"() {
-    "use strict";
-    PARTYKIT_HOST = process.env.PARTYKIT_HOST;
-    PARTYKIT_SECRET = process.env.PARTYKIT_SECRET;
-  }
-});
-
 // lib/logger.ts
 var logger;
 var init_logger = __esm({
@@ -1050,341 +1008,705 @@ var init_recommendations = __esm({
   }
 });
 
-// lib/storage.ts
-import { eq as eq2, desc as desc2, asc, and as and2, or as or2, inArray as inArray2, gt as gt2, lt, sql as sql3, isNotNull } from "drizzle-orm";
-var MemoryCache, DatabaseStorage, storage;
-var init_storage = __esm({
-  "lib/storage.ts"() {
+// lib/cloudinary.ts
+var cloudinary_exports = {};
+__export(cloudinary_exports, {
+  cloudinary: () => cloudinary,
+  deleteFromCloudinary: () => deleteFromCloudinary,
+  uploadToCloudinary: () => uploadToCloudinary
+});
+import { v2 as cloudinary } from "cloudinary";
+async function uploadToCloudinary(buffer, folder, publicIdPrefix) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      folder,
+      resource_type: "auto",
+      overwrite: false
+    };
+    if (publicIdPrefix) {
+      options.public_id = `${publicIdPrefix}-${Date.now()}`;
+    }
+    const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+      if (error || !result) {
+        logger.error("Cloudinary upload failed", error);
+        return reject(error || new Error("Cloudinary upload returned no result"));
+      }
+      resolve({ url: result.secure_url, publicId: result.public_id });
+    });
+    stream.end(buffer);
+  });
+}
+async function deleteFromCloudinary(publicIdOrUrl) {
+  try {
+    let publicId = publicIdOrUrl;
+    if (publicIdOrUrl.startsWith("https://res.cloudinary.com/")) {
+      const parts = publicIdOrUrl.split("/upload/");
+      if (parts.length === 2) {
+        const afterUpload = parts[1].replace(/^v\d+\//, "");
+        publicId = afterUpload.replace(/\.[^.]+$/, "");
+      }
+    }
+    await cloudinary.uploader.destroy(publicId);
+  } catch (err) {
+    logger.error("Cloudinary delete failed", err);
+  }
+}
+var init_cloudinary = __esm({
+  "lib/cloudinary.ts"() {
     "use strict";
-    init_schema_sqlite();
-    init_db();
     init_logger();
-    MemoryCache = class {
-      constructor(ttlSeconds = 60) {
-        this.ttlSeconds = ttlSeconds;
+    if (process.env.CLOUDINARY_URL) {
+      cloudinary.config({ cloudinary_url: process.env.CLOUDINARY_URL, secure: true });
+    } else {
+      cloudinary.config({
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+        api_key: process.env.CLOUDINARY_API_KEY,
+        api_secret: process.env.CLOUDINARY_API_SECRET,
+        secure: true
+      });
+    }
+  }
+});
+
+// lib/mail.ts
+var mail_exports = {};
+__export(mail_exports, {
+  NodemailerProvider: () => NodemailerProvider,
+  mailProvider: () => mailProvider,
+  sendConnectionRequestEmail: () => sendConnectionRequestEmail,
+  sendEventRegistrationStatusEmail: () => sendEventRegistrationStatusEmail,
+  sendNewChatMessageEmail: () => sendNewChatMessageEmail,
+  sendPostExpiringEmail: () => sendPostExpiringEmail,
+  sendResolutionEmail: () => sendResolutionEmail,
+  sendWelcomeEmail: () => sendWelcomeEmail
+});
+import nodemailer from "nodemailer";
+function getBaseTemplate(content, title) {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${title}</title>
+      <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #334155; margin: 0; padding: 0; background-color: #f8fafc; }
+        .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        .header { background: ${BRAND_COLOR}; padding: 30px; text-align: center; }
+        .header h1 { color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
+        .logo-text-accent { color: #93c5fd; }
+        .content { padding: 40px 30px; }
+        .button { display: inline-block; padding: 14px 28px; background-color: ${BRAND_COLOR}; color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 25px 0; transition: background-color 0.2s; text-align: center; }
+        .button:hover { background-color: #1d4ed8; }
+        .footer { background: #f1f5f9; padding: 25px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #e2e8f0; }
+        .alert { background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; margin: 20px 0; color: #991b1b; border-radius: 4px; }
+        .alert-title { font-weight: 700; display: block; margin-bottom: 4px; color: #7f1d1d; }
+        h2 { color: #0f172a; margin-top: 0; font-size: 22px; }
+        ul { padding-left: 20px; margin-bottom: 25px; }
+        li { margin-bottom: 10px; }
+        hr { border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Find<span class="logo-text-accent">A</span>Teammate</h1>
+        </div>
+        <div class="content">
+          ${content}
+        </div>
+        <div class="footer">
+          <p>${FOOTER_TEXT}</p>
+          <p>You received this email because you have an account on FindATeammate.<br/>
+          <a href="${process.env.FRONTEND_URL}" style="color: #64748b; text-decoration: underline;">Unsubscribe options</a></p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+async function sendWelcomeEmail(email, name) {
+  const subject = "Welcome to the Community! \u{1F680}";
+  const content = `
+    <h2>Hello ${name},</h2>
+    <p>Welcome to <strong>FindATeammate</strong>! You've just joined a community of builders, designers, and visionaries ready to create something amazing.</p>
+    
+    <p>Here is what you can do right now:</p>
+    <ul>
+      <li><strong>Complete Profile:</strong> Showcase your skills and portfolio.</li>
+      <li><strong>Post a Request:</strong> Find the perfect teammate for your idea.</li>
+      <li><strong>Connect:</strong> Chat with others in real-time.</li>
+    </ul>
+
+    <div style="text-align: center;">
+      <a href="${process.env.FRONTEND_URL}/teammates" class="button">Start Browsing</a>
+    </div>
+    
+    <hr/>
+    <p>We can't wait to see what you build!</p>
+    <p>\u2014 The FindATeammate Team</p>
+  `;
+  return await mailProvider.send({
+    to: email,
+    subject,
+    text: `Welcome to FindATeammate, ${name}! Log in to start browsing.`,
+    html: getBaseTemplate(content, "Welcome!")
+  });
+}
+async function sendResolutionEmail(email, reportId, notes) {
+  const subject = `Update on Report #${reportId}`;
+  const content = `
+    <h2>Report Resolved</h2>
+    <p>We're writing to let you know that your report (ID: <strong>#${reportId}</strong>) has been reviewed and resolved.</p>
+    
+    <div style="background-color: #f1f5f9; padding: 20px; border-radius: 8px; margin: 25px 0;">
+      <strong style="color: #475569; display: block; margin-bottom: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Admin Notes</strong>
+      ${notes}
+    </div>
+
+    <p>Thank you for helping keep our community safe.</p>
+  `;
+  return await mailProvider.send({
+    to: email,
+    subject,
+    text: `Your report #${reportId} has been resolved. Notes: ${notes}`,
+    html: getBaseTemplate(content, "Report Update")
+  });
+}
+async function sendConnectionRequestEmail(recipientEmail, recipientName, senderName, postTitle, message) {
+  const subject = `${senderName} wants to collaborate on "${postTitle}"`;
+  const content = `
+      <h2>Hello ${recipientName},</h2>
+      <p><strong>${senderName}</strong> has sent you a connection request for your post:</p>
+    
+      <div style="background-color: #f1f5f9; padding: 20px; border-radius: 8px; margin: 25px 0;">
+        <strong style="color: #0f172a; font-size: 18px; display: block; margin-bottom: 12px;">${postTitle}</strong>
+        ${message ? `<p style="color: #475569; margin: 0;"><em>"${message}"</em></p>` : ""}
+      </div>
+
+      <div style="text-align: center;">
+        <a href="${process.env.FRONTEND_URL}/requests" class="button">View Request</a>
+      </div>
+    
+      <p>Log in to accept or decline this request and start chatting!</p>
+      <p>\u2014 The FindATeammate Team</p>
+    `;
+  return await mailProvider.send({
+    to: recipientEmail,
+    subject,
+    text: `${senderName} sent you a connection request for "${postTitle}". Message: ${message}`,
+    html: getBaseTemplate(content, "New Connection Request")
+  });
+}
+async function sendEventRegistrationStatusEmail(userEmail, userName, eventName, status, rejectionReason) {
+  const isApproved = status === "approved";
+  const subject = isApproved ? `\u2705 You're in! Registration approved for "${eventName}"` : `Registration update for "${eventName}"`;
+  const content = isApproved ? `
+      <h2>Congratulations ${userName}! \u{1F389}</h2>
+      <p>Your registration for <strong>${eventName}</strong> has been <span style="color: #16a34a; font-weight: 700;">approved</span>!</p>
+    
+      <div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; padding: 20px; border-radius: 8px; margin: 25px 0;">
+        <p style="color: #15803d; margin: 0; font-weight: 600;">You're all set to participate! Check your dashboard for next steps.</p>
+      </div>
+
+      <div style="text-align: center;">
+        <a href="${process.env.FRONTEND_URL}/events" class="button">View Event Details</a>
+      </div>
+    ` : `
+      <h2>Hello ${userName},</h2>
+      <p>Thank you for your interest in <strong>${eventName}</strong>.</p>
+    
+      <div class="alert">
+        <span class="alert-title">Registration Not Approved</span>
+        Unfortunately, your registration was not approved at this time.
+        ${rejectionReason ? `<br/><br/><strong>Reason:</strong> ${rejectionReason}` : ""}
+      </div>
+
+      <p>Don't be discouraged! There are plenty of other amazing events and opportunities on FindATeammate.</p>
+    
+      <div style="text-align: center;">
+        <a href="${process.env.FRONTEND_URL}/events" class="button">Browse More Events</a>
+      </div>
+    `;
+  return await mailProvider.send({
+    to: userEmail,
+    subject,
+    text: isApproved ? `Your registration for "${eventName}" has been approved!` : `Your registration for "${eventName}" was not approved. ${rejectionReason || ""}`,
+    html: getBaseTemplate(content, "Event Registration Update")
+  });
+}
+async function sendNewChatMessageEmail(recipientEmail, recipientName, senderName, messagePreview) {
+  const subject = `New message from ${senderName}`;
+  const truncatedMessage = messagePreview.length > 100 ? messagePreview.substring(0, 100) + "..." : messagePreview;
+  const content = `
+      <h2>Hello ${recipientName},</h2>
+      <p><strong>${senderName}</strong> sent you a message:</p>
+    
+      <div style="background-color: #f8fafc; border-left: 4px solid ${BRAND_COLOR}; padding: 20px; border-radius: 8px; margin: 25px 0; font-style: italic; color: #475569;">
+        "${truncatedMessage}"
+      </div>
+
+      <div style="text-align: center;">
+        <a href="${process.env.FRONTEND_URL}/chat" class="button">Reply Now</a>
+      </div>
+    
+      <p style="font-size: 13px; color: #64748b;">You're receiving this because you have chat notifications enabled.</p>
+    `;
+  return await mailProvider.send({
+    to: recipientEmail,
+    subject,
+    text: `New message from ${senderName}: ${truncatedMessage}`,
+    html: getBaseTemplate(content, "New Message")
+  });
+}
+async function sendPostExpiringEmail(userEmail, userName, postTitle, _postId, daysLeft) {
+  const subject = `\u23F0 Your post "${postTitle}" expires in ${daysLeft} days`;
+  const content = `
+      <h2>Hello ${userName},</h2>
+      <p>Your post <strong>"${postTitle}"</strong> will expire in <strong>${daysLeft} day${daysLeft > 1 ? "s" : ""}</strong>.</p>
+    
+      <div style="background-color: #fff7ed; border-left: 4px solid #f59e0b; padding: 20px; border-radius: 8px; margin: 25px 0;">
+        <p style="color: #92400e; margin: 0;">If you're still looking for teammates, consider updating your post or creating a new one to stay visible!</p>
+      </div>
+
+      <div style="text-align: center;">
+        <a href="${process.env.FRONTEND_URL}/my-posts" class="button">Manage My Posts</a>
+      </div>
+    `;
+  return await mailProvider.send({
+    to: userEmail,
+    subject,
+    text: `Your post "${postTitle}" expires in ${daysLeft} days. Update it to stay visible!`,
+    html: getBaseTemplate(content, "Post Expiring Soon")
+  });
+}
+var NodemailerProvider, mailProvider, BRAND_COLOR, FOOTER_TEXT;
+var init_mail = __esm({
+  "lib/mail.ts"() {
+    "use strict";
+    init_logger();
+    NodemailerProvider = class {
+      transporter;
+      constructor() {
+        if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+          logger.warn("WARNING: SMTP_USER or SMTP_PASS environment variables are not set. Email sending is disabled.");
+          this.transporter = null;
+          return;
+        }
+        this.transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST || "smtp.gmail.com",
+          port: parseInt(process.env.SMTP_PORT || "465"),
+          secure: true,
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+          },
+          tls: {
+            rejectUnauthorized: process.env.NODE_ENV === "production"
+          }
+        });
       }
-      cache = /* @__PURE__ */ new Map();
-      get(key) {
-        return this.cache.get(key);
-      }
-      set(key, value) {
-        this.cache.set(key, value);
-      }
-      delete(key) {
-        this.cache.delete(key);
-      }
-      clear() {
-        this.cache.clear();
+      async send(options) {
+        try {
+          if (!this.transporter) {
+            logger.warn(`[Mail Disabled] Logging Email: To: ${options.to}, Subject: ${options.subject}`);
+            return true;
+          }
+          const from = process.env.SMTP_FROM || '"FindATeammate Support" <support@findateammate.online>';
+          const info = await this.transporter.sendMail({
+            from,
+            ...options
+          });
+          logger.log(`Email sent: ${info.messageId}`);
+          return true;
+        } catch (error) {
+          logger.error("Nodemailer send error:", error);
+          return false;
+        }
       }
     };
-    DatabaseStorage = class {
-      settingCache = /* @__PURE__ */ new Map();
-      pendingSettings = /* @__PURE__ */ new Map();
-      // Cache for Users (TTL: 30 seconds) - heavily hit by session middleware
-      userCache = new MemoryCache(30);
-      // Cache for Posts (TTL: 60 seconds) - heavily hit by viral content
-      postCache = new MemoryCache(60);
-      // Cache for Admin Stats (TTL: 300 seconds/5 mins) - heavy aggregation
-      adminStatsCache = new MemoryCache(300);
-      // Users
-      async getUser(id) {
-        const cached = await this.userCache.get(id);
-        if (cached) return cached;
-        const [user] = await db.select().from(users).where(eq2(users.id, id));
-        if (user) await this.userCache.set(id, user);
-        return user;
-      }
-      async getUserByEmail(email) {
-        const [user] = await db.select().from(users).where(eq2(users.email, email));
-        return user;
-      }
-      async getUserByGoogleId(googleId) {
-        const [user] = await db.select().from(users).where(eq2(users.googleId, googleId));
-        return user;
-      }
-      async getUsers(limit) {
-        const query = db.select().from(users).orderBy(asc(users.name));
-        return limit ? await query.limit(limit) : await query;
-      }
-      async createUser(user) {
-        const [newUser] = await db.insert(users).values(user).returning();
+    mailProvider = new NodemailerProvider();
+    BRAND_COLOR = "#2563eb";
+    FOOTER_TEXT = "\xA9 2026 FindATeammate. All rights reserved.";
+  }
+});
+
+// api/_entry.ts
+import serverless from "serverless-http";
+
+// lib/routes.ts
+import express2 from "express";
+
+// lib/realtime.ts
+var PARTYKIT_HOST = process.env.PARTYKIT_HOST;
+var PARTYKIT_SECRET = process.env.PARTYKIT_SECRET;
+async function publishToRoom(party, roomId, payload) {
+  const url = `https://${PARTYKIT_HOST}/parties/${party}/${roomId}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-partykit-secret": PARTYKIT_SECRET
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      console.error(`[Realtime] Failed to publish to ${party}/${roomId}: ${res.status}`);
+    }
+  } catch (err) {
+    console.error(`[Realtime] Network error publishing to ${party}/${roomId}:`, err);
+  }
+}
+async function emitNotification(userId, payload) {
+  await publishToRoom("notifications", userId, { type: "notification", ...payload ?? {} });
+}
+async function emitChatUpdated(userIds, chatId) {
+  await Promise.all(
+    userIds.map((uid) => publishToRoom("notifications", uid, { type: "chat_updated", chatId }))
+  );
+}
+async function emitMessage(chatId, enrichedMessage) {
+  await publishToRoom("chat", chatId, { type: "receive_message", ...enrichedMessage });
+}
+async function emitMaintenance(value) {
+  await publishToRoom("global", "global", { type: "maintenance_update", value });
+}
+
+// lib/routes.ts
+init_logger();
+
+// lib/storage.ts
+init_schema_sqlite();
+init_db();
+init_logger();
+import { eq as eq2, desc as desc2, asc, and as and2, or as or2, inArray as inArray2, gt as gt2, lt, sql as sql3, isNotNull } from "drizzle-orm";
+var MemoryCache = class {
+  constructor(ttlSeconds = 60) {
+    this.ttlSeconds = ttlSeconds;
+  }
+  cache = /* @__PURE__ */ new Map();
+  get(key) {
+    return this.cache.get(key);
+  }
+  set(key, value) {
+    this.cache.set(key, value);
+  }
+  delete(key) {
+    this.cache.delete(key);
+  }
+  clear() {
+    this.cache.clear();
+  }
+};
+var DatabaseStorage = class {
+  settingCache = /* @__PURE__ */ new Map();
+  pendingSettings = /* @__PURE__ */ new Map();
+  // Cache for Users (TTL: 30 seconds) - heavily hit by session middleware
+  userCache = new MemoryCache(30);
+  // Cache for Posts (TTL: 60 seconds) - heavily hit by viral content
+  postCache = new MemoryCache(60);
+  // Cache for Admin Stats (TTL: 300 seconds/5 mins) - heavy aggregation
+  adminStatsCache = new MemoryCache(300);
+  // Users
+  async getUser(id) {
+    const cached = await this.userCache.get(id);
+    if (cached) return cached;
+    const [user] = await db.select().from(users).where(eq2(users.id, id));
+    if (user) await this.userCache.set(id, user);
+    return user;
+  }
+  async getUserByEmail(email) {
+    const [user] = await db.select().from(users).where(eq2(users.email, email));
+    return user;
+  }
+  async getUserByGoogleId(googleId) {
+    const [user] = await db.select().from(users).where(eq2(users.googleId, googleId));
+    return user;
+  }
+  async getUsers(limit) {
+    const query = db.select().from(users).orderBy(asc(users.name));
+    return limit ? await query.limit(limit) : await query;
+  }
+  async createUser(user) {
+    const [newUser] = await db.insert(users).values(user).returning();
+    await this.adminStatsCache.delete("stats");
+    return newUser;
+  }
+  async createOAuthUser(user) {
+    const [newUser] = await db.insert(users).values(user).returning();
+    await this.adminStatsCache.delete("stats");
+    return newUser;
+  }
+  async updateUser(id, userData) {
+    return await db.transaction(async (tx) => {
+      const [updatedUser] = await tx.update(users).set(userData).where(eq2(users.id, id)).returning();
+      await this.userCache.delete(id);
+      if (userData.isBanned !== void 0 || userData.isAdmin !== void 0 || userData.isOrganiser !== void 0) {
         await this.adminStatsCache.delete("stats");
-        return newUser;
       }
-      async createOAuthUser(user) {
-        const [newUser] = await db.insert(users).values(user).returning();
-        await this.adminStatsCache.delete("stats");
-        return newUser;
+      if (userData.name) {
+        await tx.update(posts).set({ userName: userData.name }).where(eq2(posts.userId, id));
+        await tx.update(connectionRequests).set({ fromUserName: userData.name }).where(eq2(connectionRequests.fromUserId, id));
+        await tx.update(connectionRequests).set({ toUserName: userData.name }).where(eq2(connectionRequests.toUserId, id));
       }
-      async updateUser(id, userData) {
-        return await db.transaction(async (tx) => {
-          const [updatedUser] = await tx.update(users).set(userData).where(eq2(users.id, id)).returning();
-          await this.userCache.delete(id);
-          if (userData.isBanned !== void 0 || userData.isAdmin !== void 0 || userData.isOrganiser !== void 0) {
-            await this.adminStatsCache.delete("stats");
-          }
-          if (userData.name) {
-            await tx.update(posts).set({ userName: userData.name }).where(eq2(posts.userId, id));
-            await tx.update(connectionRequests).set({ fromUserName: userData.name }).where(eq2(connectionRequests.fromUserId, id));
-            await tx.update(connectionRequests).set({ toUserName: userData.name }).where(eq2(connectionRequests.toUserId, id));
-          }
-          if (userData.skills && userData.skills.length > 0) {
-            const primarySkill = userData.skills[0];
-            await tx.update(posts).set({ userSkill: primarySkill }).where(eq2(posts.userId, id));
-            await tx.update(connectionRequests).set({ fromUserSkill: primarySkill }).where(eq2(connectionRequests.fromUserId, id));
-          }
-          return updatedUser;
-        });
+      if (userData.skills && userData.skills.length > 0) {
+        const primarySkill = userData.skills[0];
+        await tx.update(posts).set({ userSkill: primarySkill }).where(eq2(posts.userId, id));
+        await tx.update(connectionRequests).set({ fromUserSkill: primarySkill }).where(eq2(connectionRequests.fromUserId, id));
       }
-      async verifyUser(id) {
-        const [user] = await db.update(users).set({
-          isVerified: true
-        }).where(eq2(users.id, id)).returning();
-        await this.userCache.delete(id);
-        return user;
-      }
-      async updateLastActive(id) {
-        db.update(users).set({ lastActive: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).execute().catch((err) => logger.error("Failed to update lastActive", err));
-      }
-      // Posts
-      async getPosts(cursor, limit = 20, viewerId) {
-        const columns = {
-          id: posts.id,
-          title: posts.title,
-          skillsOffered: posts.skillsOffered,
-          skillsWanted: posts.skillsWanted,
-          description: posts.description,
-          availability: posts.availability,
-          city: posts.city,
-          university: posts.university,
-          eventName: posts.eventName,
-          eventType: posts.eventType,
-          hostCollege: posts.hostCollege,
-          eventDate: posts.eventDate,
-          eventWebsite: posts.eventWebsite,
-          eventImage: posts.eventImage,
-          eventDetails: posts.eventDetails,
-          eventUpvotes: posts.eventUpvotes,
-          isEventOrganiser: posts.isEventOrganiser,
-          allowedDepartments: posts.allowedDepartments,
-          requiredSkills: posts.requiredSkills,
-          requiredInterests: posts.requiredInterests,
-          specialRequirements: posts.specialRequirements,
-          maxCrossDeptParticipants: posts.maxCrossDeptParticipants,
-          crossDeptRequiresApproval: posts.crossDeptRequiresApproval,
-          userId: posts.userId,
-          userName: posts.userName,
-          userSkill: posts.userSkill,
-          createdAt: posts.createdAt
-        };
-        let query = db.select({
-          ...columns,
-          organizerDepartment: users.department,
-          myVote: viewerId ? eventVotes.voteType : sql3`null`
-        }).from(posts).leftJoin(users, eq2(users.id, posts.userId)).limit(limit + 1).orderBy(desc2(posts.createdAt));
-        if (viewerId) {
-          query = query.leftJoin(
-            eventVotes,
-            and2(
-              eq2(eventVotes.postId, posts.id),
-              eq2(eventVotes.userId, viewerId)
-            )
-          );
-        }
-        if (cursor) {
-          query = query.where(lt(posts.createdAt, cursor));
-        }
-        const items = await query;
-        let nextCursor = null;
-        if (items.length > limit) {
-          const nextItem = items.pop();
-          nextCursor = nextItem?.createdAt || null;
-        }
-        if (viewerId && !cursor && items.length > 0) {
-          try {
-            const { getRecommendedPosts: getRecommendedPosts2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-            const recentlySeen = await db.select({ postId: postInteractions.postId }).from(postInteractions).where(eq2(postInteractions.userId, viewerId)).orderBy(desc2(postInteractions.createdAt)).limit(100);
-            const excludePostIds = recentlySeen.map((r) => r.postId);
-            const scores = await getRecommendedPosts2(viewerId, excludePostIds, Math.max(limit * 4, 50));
-            const scoreMap = new Map(scores.map((s) => [s.postId, s.score]));
-            items.sort((a, b) => {
-              const scoreA = scoreMap.get(a.id) || 0;
-              const scoreB = scoreMap.get(b.id) || 0;
-              if (Math.abs(scoreA - scoreB) > 0.1) {
-                return scoreB - scoreA;
-              } else {
-                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-              }
-            });
-          } catch (error) {
-            logger.error("Failed to apply personalized ranking", { error, viewerId });
-          }
-        }
-        return { items, nextCursor };
-      }
-      async getPost(id) {
-        const cached = await this.postCache.get(id);
-        if (cached) return cached;
-        const [post] = await db.select().from(posts).where(eq2(posts.id, id));
-        if (post) await this.postCache.set(id, post);
-        return post;
-      }
-      async getPostsByUser(userId) {
-        return await db.select().from(posts).where(eq2(posts.userId, userId));
-      }
-      async createPost(post) {
-        const safePost = {
-          ...post,
-          // Defensive normalization for clients that may send malformed optional values.
-          allowedDepartments: Array.isArray(post.allowedDepartments) ? post.allowedDepartments.filter((dept) => typeof dept === "string").map((dept) => dept.trim()).filter((dept) => dept.length > 0) : null,
-          requiredSkills: Array.isArray(post.requiredSkills) ? post.requiredSkills : [],
-          requiredInterests: Array.isArray(post.requiredInterests) ? post.requiredInterests : [],
-          crossDeptRequiresApproval: typeof post.crossDeptRequiresApproval === "boolean" ? post.crossDeptRequiresApproval : true,
-          isEventOrganiser: typeof post.isEventOrganiser === "boolean" ? post.isEventOrganiser : false
-        };
-        const [newPost] = await db.insert(posts).values(safePost).returning();
-        await this.adminStatsCache.delete("stats");
-        return newPost;
-      }
-      async deletePost(id) {
-        await db.transaction(async (tx) => {
-          const requests = await tx.select().from(connectionRequests).where(eq2(connectionRequests.postId, id));
-          if (requests.length > 0) {
-            const chatIds = requests.map((r) => r.id);
-            await tx.delete(messages).where(inArray2(messages.chatId, chatIds));
-          }
-          await tx.delete(connectionRequests).where(eq2(connectionRequests.postId, id));
-          await tx.delete(posts).where(eq2(posts.id, id));
-          await this.postCache.delete(id);
-          await this.adminStatsCache.delete("stats");
-        });
-      }
-      async updatePost(id, postData) {
-        const [updatedPost] = await db.update(posts).set(postData).where(eq2(posts.id, id)).returning();
-        await this.postCache.delete(id);
-        return updatedPost;
-      }
-      async upvoteEvent(id, userId) {
-        await db.transaction(async (tx) => {
-          const [existingVote] = await tx.select().from(eventVotes).where(
-            and2(eq2(eventVotes.postId, id), eq2(eventVotes.userId, userId))
-          );
-          if (existingVote) {
-            if (existingVote.voteType === 1) {
-              await tx.delete(eventVotes).where(eq2(eventVotes.id, existingVote.id));
-              await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) - 1` }).where(eq2(posts.id, id));
-            } else {
-              await tx.update(eventVotes).set({ voteType: 1 }).where(eq2(eventVotes.id, existingVote.id));
-              await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) + 2` }).where(eq2(posts.id, id));
-            }
+      return updatedUser;
+    });
+  }
+  async verifyUser(id) {
+    const [user] = await db.update(users).set({
+      isVerified: true
+    }).where(eq2(users.id, id)).returning();
+    await this.userCache.delete(id);
+    return user;
+  }
+  async updateLastActive(id) {
+    db.update(users).set({ lastActive: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).execute().catch((err) => logger.error("Failed to update lastActive", err));
+  }
+  // Posts
+  async getPosts(cursor, limit = 20, viewerId) {
+    const columns = {
+      id: posts.id,
+      title: posts.title,
+      skillsOffered: posts.skillsOffered,
+      skillsWanted: posts.skillsWanted,
+      description: posts.description,
+      availability: posts.availability,
+      city: posts.city,
+      university: posts.university,
+      eventName: posts.eventName,
+      eventType: posts.eventType,
+      hostCollege: posts.hostCollege,
+      eventDate: posts.eventDate,
+      eventWebsite: posts.eventWebsite,
+      eventImage: posts.eventImage,
+      eventDetails: posts.eventDetails,
+      eventUpvotes: posts.eventUpvotes,
+      isEventOrganiser: posts.isEventOrganiser,
+      allowedDepartments: posts.allowedDepartments,
+      requiredSkills: posts.requiredSkills,
+      requiredInterests: posts.requiredInterests,
+      specialRequirements: posts.specialRequirements,
+      maxCrossDeptParticipants: posts.maxCrossDeptParticipants,
+      crossDeptRequiresApproval: posts.crossDeptRequiresApproval,
+      userId: posts.userId,
+      userName: posts.userName,
+      userSkill: posts.userSkill,
+      createdAt: posts.createdAt
+    };
+    let query = db.select({
+      ...columns,
+      organizerDepartment: users.department,
+      myVote: viewerId ? eventVotes.voteType : sql3`null`
+    }).from(posts).leftJoin(users, eq2(users.id, posts.userId)).limit(limit + 1).orderBy(desc2(posts.createdAt));
+    if (viewerId) {
+      query = query.leftJoin(
+        eventVotes,
+        and2(
+          eq2(eventVotes.postId, posts.id),
+          eq2(eventVotes.userId, viewerId)
+        )
+      );
+    }
+    if (cursor) {
+      query = query.where(lt(posts.createdAt, cursor));
+    }
+    const items = await query;
+    let nextCursor = null;
+    if (items.length > limit) {
+      const nextItem = items.pop();
+      nextCursor = nextItem?.createdAt || null;
+    }
+    if (viewerId && !cursor && items.length > 0) {
+      try {
+        const { getRecommendedPosts: getRecommendedPosts2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
+        const recentlySeen = await db.select({ postId: postInteractions.postId }).from(postInteractions).where(eq2(postInteractions.userId, viewerId)).orderBy(desc2(postInteractions.createdAt)).limit(100);
+        const excludePostIds = recentlySeen.map((r) => r.postId);
+        const scores = await getRecommendedPosts2(viewerId, excludePostIds, Math.max(limit * 4, 50));
+        const scoreMap = new Map(scores.map((s) => [s.postId, s.score]));
+        items.sort((a, b) => {
+          const scoreA = scoreMap.get(a.id) || 0;
+          const scoreB = scoreMap.get(b.id) || 0;
+          if (Math.abs(scoreA - scoreB) > 0.1) {
+            return scoreB - scoreA;
           } else {
-            await tx.insert(eventVotes).values({ postId: id, userId, voteType: 1 });
-            await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) + 1` }).where(eq2(posts.id, id));
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
           }
-          await this.postCache.delete(id);
         });
+      } catch (error) {
+        logger.error("Failed to apply personalized ranking", { error, viewerId });
       }
-      async downvoteEvent(id, userId) {
-        await db.transaction(async (tx) => {
-          const [existingVote] = await tx.select().from(eventVotes).where(
-            and2(eq2(eventVotes.postId, id), eq2(eventVotes.userId, userId))
-          );
-          if (existingVote) {
-            if (existingVote.voteType === -1) {
-              await tx.delete(eventVotes).where(eq2(eventVotes.id, existingVote.id));
-              await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) + 1` }).where(eq2(posts.id, id));
-            } else {
-              await tx.update(eventVotes).set({ voteType: -1 }).where(eq2(eventVotes.id, existingVote.id));
-              await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) - 2` }).where(eq2(posts.id, id));
-            }
-          } else {
-            await tx.insert(eventVotes).values({ postId: id, userId, voteType: -1 });
-            await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) - 1` }).where(eq2(posts.id, id));
-          }
-          await this.postCache.delete(id);
-        });
+    }
+    return { items, nextCursor };
+  }
+  async getPost(id) {
+    const cached = await this.postCache.get(id);
+    if (cached) return cached;
+    const [post] = await db.select().from(posts).where(eq2(posts.id, id));
+    if (post) await this.postCache.set(id, post);
+    return post;
+  }
+  async getPostsByUser(userId) {
+    return await db.select().from(posts).where(eq2(posts.userId, userId));
+  }
+  async createPost(post) {
+    const safePost = {
+      ...post,
+      // Defensive normalization for clients that may send malformed optional values.
+      allowedDepartments: Array.isArray(post.allowedDepartments) ? post.allowedDepartments.filter((dept) => typeof dept === "string").map((dept) => dept.trim()).filter((dept) => dept.length > 0) : null,
+      requiredSkills: Array.isArray(post.requiredSkills) ? post.requiredSkills : [],
+      requiredInterests: Array.isArray(post.requiredInterests) ? post.requiredInterests : [],
+      crossDeptRequiresApproval: typeof post.crossDeptRequiresApproval === "boolean" ? post.crossDeptRequiresApproval : true,
+      isEventOrganiser: typeof post.isEventOrganiser === "boolean" ? post.isEventOrganiser : false
+    };
+    const [newPost] = await db.insert(posts).values(safePost).returning();
+    await this.adminStatsCache.delete("stats");
+    return newPost;
+  }
+  async deletePost(id) {
+    await db.transaction(async (tx) => {
+      const requests = await tx.select().from(connectionRequests).where(eq2(connectionRequests.postId, id));
+      if (requests.length > 0) {
+        const chatIds = requests.map((r) => r.id);
+        await tx.delete(messages).where(inArray2(messages.chatId, chatIds));
       }
-      async isUserInChat(chatId, userId) {
-        const [request] = await db.select().from(connectionRequests).where(eq2(connectionRequests.id, chatId));
-        if (!request) return false;
-        return request.fromUserId === userId || request.toUserId === userId;
-      }
-      // Connection Requests
-      async getConnectionRequests(userId, limit = 50) {
-        return await db.select().from(connectionRequests).where(
-          or2(
-            eq2(connectionRequests.toUserId, userId),
-            eq2(connectionRequests.fromUserId, userId)
-          )
-        ).limit(limit).orderBy(desc2(connectionRequests.createdAt));
-      }
-      async getConnectionRequest(id) {
-        const [request] = await db.select().from(connectionRequests).where(eq2(connectionRequests.id, id));
-        return request;
-      }
-      async getExistingRequest(fromUserId, toUserId, postId) {
-        const [request] = await db.select().from(connectionRequests).where(
-          and2(
-            eq2(connectionRequests.fromUserId, fromUserId),
-            eq2(connectionRequests.toUserId, toUserId),
-            eq2(connectionRequests.postId, postId)
-          )
-        );
-        return request;
-      }
-      async createConnectionRequest(request) {
-        const [newReq] = await db.insert(connectionRequests).values(request).returning();
-        return newReq;
-      }
-      async updateConnectionRequestStatus(id, status) {
-        await db.update(connectionRequests).set({ status }).where(eq2(connectionRequests.id, id));
-      }
-      async deleteConnectionRequest(id) {
-        await db.transaction(async (tx) => {
-          await tx.delete(messages).where(eq2(messages.chatId, id));
-          await tx.delete(connectionRequests).where(eq2(connectionRequests.id, id));
-        });
-      }
-      // Event Registrations
-      async getEventRegistrations(postId) {
-        return await db.select().from(eventRegistrations).where(eq2(eventRegistrations.postId, postId));
-      }
-      async getEventRegistration(id) {
-        const result = await db.select().from(eventRegistrations).where(eq2(eventRegistrations.id, id)).limit(1);
-        return result[0];
-      }
-      async getExistingRegistration(postId, userId) {
-        const result = await db.select().from(eventRegistrations).where(and2(eq2(eventRegistrations.postId, postId), eq2(eventRegistrations.userId, userId))).limit(1);
-        return result[0];
-      }
-      async getUserEventRegistrations(userId) {
-        return await db.select().from(eventRegistrations).where(eq2(eventRegistrations.userId, userId)).orderBy(desc2(eventRegistrations.createdAt));
-      }
-      async createEventRegistration(registration) {
-        const [created] = await db.insert(eventRegistrations).values(registration).returning();
-        return created;
-      }
-      async updateEventRegistrationStatus(id, status, rejectionReason) {
-        const updateData = { status, updatedAt: /* @__PURE__ */ new Date() };
-        if (rejectionReason) {
-          updateData.rejectionReason = rejectionReason;
+      await tx.delete(connectionRequests).where(eq2(connectionRequests.postId, id));
+      await tx.delete(posts).where(eq2(posts.id, id));
+      await this.postCache.delete(id);
+      await this.adminStatsCache.delete("stats");
+    });
+  }
+  async updatePost(id, postData) {
+    const [updatedPost] = await db.update(posts).set(postData).where(eq2(posts.id, id)).returning();
+    await this.postCache.delete(id);
+    return updatedPost;
+  }
+  async upvoteEvent(id, userId) {
+    await db.transaction(async (tx) => {
+      const [existingVote] = await tx.select().from(eventVotes).where(
+        and2(eq2(eventVotes.postId, id), eq2(eventVotes.userId, userId))
+      );
+      if (existingVote) {
+        if (existingVote.voteType === 1) {
+          await tx.delete(eventVotes).where(eq2(eventVotes.id, existingVote.id));
+          await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) - 1` }).where(eq2(posts.id, id));
+        } else {
+          await tx.update(eventVotes).set({ voteType: 1 }).where(eq2(eventVotes.id, existingVote.id));
+          await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) + 2` }).where(eq2(posts.id, id));
         }
-        const [updated] = await db.update(eventRegistrations).set(updateData).where(eq2(eventRegistrations.id, id)).returning();
-        return updated;
+      } else {
+        await tx.insert(eventVotes).values({ postId: id, userId, voteType: 1 });
+        await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) + 1` }).where(eq2(posts.id, id));
       }
-      async deleteEventRegistration(id) {
-        await db.delete(eventRegistrations).where(eq2(eventRegistrations.id, id));
+      await this.postCache.delete(id);
+    });
+  }
+  async downvoteEvent(id, userId) {
+    await db.transaction(async (tx) => {
+      const [existingVote] = await tx.select().from(eventVotes).where(
+        and2(eq2(eventVotes.postId, id), eq2(eventVotes.userId, userId))
+      );
+      if (existingVote) {
+        if (existingVote.voteType === -1) {
+          await tx.delete(eventVotes).where(eq2(eventVotes.id, existingVote.id));
+          await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) + 1` }).where(eq2(posts.id, id));
+        } else {
+          await tx.update(eventVotes).set({ voteType: -1 }).where(eq2(eventVotes.id, existingVote.id));
+          await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) - 2` }).where(eq2(posts.id, id));
+        }
+      } else {
+        await tx.insert(eventVotes).values({ postId: id, userId, voteType: -1 });
+        await tx.update(posts).set({ eventUpvotes: sql3`COALESCE(${posts.eventUpvotes}, 0) - 1` }).where(eq2(posts.id, id));
       }
-      async getPendingRegistrationsForEvent(postId) {
-        return await db.select().from(eventRegistrations).where(and2(eq2(eventRegistrations.postId, postId), eq2(eventRegistrations.status, "pending"))).orderBy(desc2(eventRegistrations.createdAt));
-      }
-      // Chats & Messages
-      async getChats(userId) {
-        try {
-          const reqs = await this.getConnectionRequests(userId);
-          if (reqs.length === 0) return [];
-          const chatIds = reqs.map((r) => r.id);
-          const lastMessagesResult = await db.all(sql3`
+      await this.postCache.delete(id);
+    });
+  }
+  async isUserInChat(chatId, userId) {
+    const [request] = await db.select().from(connectionRequests).where(eq2(connectionRequests.id, chatId));
+    if (!request) return false;
+    return request.fromUserId === userId || request.toUserId === userId;
+  }
+  // Connection Requests
+  async getConnectionRequests(userId, limit = 50) {
+    return await db.select().from(connectionRequests).where(
+      or2(
+        eq2(connectionRequests.toUserId, userId),
+        eq2(connectionRequests.fromUserId, userId)
+      )
+    ).limit(limit).orderBy(desc2(connectionRequests.createdAt));
+  }
+  async getConnectionRequest(id) {
+    const [request] = await db.select().from(connectionRequests).where(eq2(connectionRequests.id, id));
+    return request;
+  }
+  async getExistingRequest(fromUserId, toUserId, postId) {
+    const [request] = await db.select().from(connectionRequests).where(
+      and2(
+        eq2(connectionRequests.fromUserId, fromUserId),
+        eq2(connectionRequests.toUserId, toUserId),
+        eq2(connectionRequests.postId, postId)
+      )
+    );
+    return request;
+  }
+  async createConnectionRequest(request) {
+    const [newReq] = await db.insert(connectionRequests).values(request).returning();
+    return newReq;
+  }
+  async updateConnectionRequestStatus(id, status) {
+    await db.update(connectionRequests).set({ status }).where(eq2(connectionRequests.id, id));
+  }
+  async deleteConnectionRequest(id) {
+    await db.transaction(async (tx) => {
+      await tx.delete(messages).where(eq2(messages.chatId, id));
+      await tx.delete(connectionRequests).where(eq2(connectionRequests.id, id));
+    });
+  }
+  // Event Registrations
+  async getEventRegistrations(postId) {
+    return await db.select().from(eventRegistrations).where(eq2(eventRegistrations.postId, postId));
+  }
+  async getEventRegistration(id) {
+    const result = await db.select().from(eventRegistrations).where(eq2(eventRegistrations.id, id)).limit(1);
+    return result[0];
+  }
+  async getExistingRegistration(postId, userId) {
+    const result = await db.select().from(eventRegistrations).where(and2(eq2(eventRegistrations.postId, postId), eq2(eventRegistrations.userId, userId))).limit(1);
+    return result[0];
+  }
+  async getUserEventRegistrations(userId) {
+    return await db.select().from(eventRegistrations).where(eq2(eventRegistrations.userId, userId)).orderBy(desc2(eventRegistrations.createdAt));
+  }
+  async createEventRegistration(registration) {
+    const [created] = await db.insert(eventRegistrations).values(registration).returning();
+    return created;
+  }
+  async updateEventRegistrationStatus(id, status, rejectionReason) {
+    const updateData = { status, updatedAt: /* @__PURE__ */ new Date() };
+    if (rejectionReason) {
+      updateData.rejectionReason = rejectionReason;
+    }
+    const [updated] = await db.update(eventRegistrations).set(updateData).where(eq2(eventRegistrations.id, id)).returning();
+    return updated;
+  }
+  async deleteEventRegistration(id) {
+    await db.delete(eventRegistrations).where(eq2(eventRegistrations.id, id));
+  }
+  async getPendingRegistrationsForEvent(postId) {
+    return await db.select().from(eventRegistrations).where(and2(eq2(eventRegistrations.postId, postId), eq2(eventRegistrations.status, "pending"))).orderBy(desc2(eventRegistrations.createdAt));
+  }
+  // Chats & Messages
+  async getChats(userId) {
+    try {
+      const reqs = await this.getConnectionRequests(userId);
+      if (reqs.length === 0) return [];
+      const chatIds = reqs.map((r) => r.id);
+      const lastMessagesResult = await db.all(sql3`
         WITH RankedMessages AS (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY ${messages.chatId} ORDER BY ${messages.timestamp} DESC) as rn
           FROM ${messages}
@@ -1392,506 +1714,512 @@ var init_storage = __esm({
         )
         SELECT * FROM RankedMessages WHERE rn = 1
       `);
-          const lastMessagesMap = /* @__PURE__ */ new Map();
-          lastMessagesResult.forEach((msg) => {
-            lastMessagesMap.set(msg.chat_id, msg);
-          });
-          const allPartnerIds = /* @__PURE__ */ new Set();
-          reqs.forEach((req) => {
-            const isIncoming = req.toUserId === userId;
-            const partnerId = isIncoming ? req.fromUserId : req.toUserId;
-            allPartnerIds.add(partnerId);
-          });
-          const userMap = /* @__PURE__ */ new Map();
-          if (allPartnerIds.size > 0) {
-            const usersFound = await db.select().from(users).where(inArray2(users.id, Array.from(allPartnerIds)));
-            usersFound.forEach((u) => userMap.set(u.id, u));
-          }
-          const chats = reqs.map((req) => {
-            const isIncoming = req.toUserId === userId;
-            const partnerId = isIncoming ? req.fromUserId : req.toUserId;
-            const partnerUser = userMap.get(partnerId);
-            const partnerName = isIncoming ? req.fromUserName || partnerUser?.name || "Unknown User" : req.toUserName || partnerUser?.name || "Unknown User";
-            const partnerAvatar = partnerUser?.avatar || null;
-            const lastMsg = lastMessagesMap.get(req.id);
-            return {
-              id: req.id,
-              partnerName,
-              partnerId,
-              partnerAvatar,
-              lastMessage: lastMsg ? lastMsg.text : null,
-              timestamp: lastMsg ? new Date(lastMsg.timestamp) : req.createdAt,
-              unreadCount: 0
-            };
-          });
-          return chats.sort((a, b) => {
-            const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
-            const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
-            return bTime - aTime;
-          });
-        } catch (error) {
-          logger.error("Error in getChats", error);
-          throw error;
-        }
+      const lastMessagesMap = /* @__PURE__ */ new Map();
+      lastMessagesResult.forEach((msg) => {
+        lastMessagesMap.set(msg.chat_id, msg);
+      });
+      const allPartnerIds = /* @__PURE__ */ new Set();
+      reqs.forEach((req) => {
+        const isIncoming = req.toUserId === userId;
+        const partnerId = isIncoming ? req.fromUserId : req.toUserId;
+        allPartnerIds.add(partnerId);
+      });
+      const userMap = /* @__PURE__ */ new Map();
+      if (allPartnerIds.size > 0) {
+        const usersFound = await db.select().from(users).where(inArray2(users.id, Array.from(allPartnerIds)));
+        usersFound.forEach((u) => userMap.set(u.id, u));
       }
-      async getMessages(chatId, userId, beforeTimestamp) {
-        let cutoffDate = /* @__PURE__ */ new Date(0);
-        if (userId) {
-          const request = await this.getConnectionRequest(chatId);
-          if (request) {
-            if (request.fromUserId === userId && request.fromUserLastCleared) {
-              cutoffDate = request.fromUserLastCleared;
-            } else if (request.toUserId === userId && request.toUserLastCleared) {
-              cutoffDate = request.toUserLastCleared;
-            }
-          }
-        }
-        const conditions = [
-          eq2(messages.chatId, chatId),
-          gt2(messages.timestamp, cutoffDate)
-        ];
-        if (beforeTimestamp) {
-          conditions.push(lt(messages.timestamp, beforeTimestamp));
-        }
-        return await db.select().from(messages).where(and2(...conditions)).orderBy(desc2(messages.timestamp)).limit(50).then((msgs) => msgs.reverse());
-      }
-      async createMessage(insertMessage) {
-        const [message] = await db.insert(messages).values(insertMessage).returning();
-        await db.update(connectionRequests).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq2(connectionRequests.id, insertMessage.chatId));
-        return message;
-      }
-      async clearChatHistory(chatId, userId) {
-        const request = await this.getConnectionRequest(chatId);
-        if (!request) throw new Error("Chat not found");
-        const now = /* @__PURE__ */ new Date();
-        if (request.fromUserId === userId) {
-          await db.update(connectionRequests).set({ fromUserLastCleared: now }).where(eq2(connectionRequests.id, chatId));
-        } else if (request.toUserId === userId) {
-          await db.update(connectionRequests).set({ toUserLastCleared: now }).where(eq2(connectionRequests.id, chatId));
-        } else {
-          throw new Error("User is not part of this chat");
-        }
-      }
-      // Notifications
-      async getNotifications(userId, limit = 50) {
-        return await db.select().from(notifications).where(eq2(notifications.userId, userId)).orderBy(desc2(notifications.createdAt)).limit(limit);
-      }
-      async createNotification(notification) {
-        const [newNotification] = await db.insert(notifications).values(notification).returning();
-        return newNotification;
-      }
-      async markNotificationsRead(userId, ids) {
-        if (ids.length === 0) return;
-        await db.update(notifications).set({ isRead: true }).where(
-          and2(
-            eq2(notifications.userId, userId),
-            inArray2(notifications.id, ids)
-          )
-        );
-      }
-      async markAllNotificationsRead(userId) {
-        await db.update(notifications).set({ isRead: true }).where(eq2(notifications.userId, userId));
-      }
-      async deleteNotifications(userId, ids) {
-        if (ids.length === 0) return;
-        await db.delete(notifications).where(
-          and2(
-            eq2(notifications.userId, userId),
-            inArray2(notifications.id, ids)
-          )
-        );
-      }
-      async deleteAllNotifications(userId) {
-        await db.transaction(async (tx) => {
-          await tx.delete(notifications).where(eq2(notifications.userId, userId));
-        });
-      }
-      async getUnreadNotificationsCount(userId) {
-        const [result] = await db.select({ count: sql3`count(*)` }).from(notifications).where(and2(eq2(notifications.userId, userId), eq2(notifications.isRead, false)));
-        return Number(result?.count || 0);
-      }
-      // Analytics
-      async logEvent(event) {
-        await db.insert(analytics).values(event);
-      }
-      // Admin
-      async promoteUser(id, isAdmin) {
-        const [user] = await db.update(users).set({ isAdmin }).where(eq2(users.id, id)).returning();
-        await this.userCache.delete(id);
-        await this.adminStatsCache.delete("stats");
-        return user;
-      }
-      async promoteOrganiser(id, isOrganiser) {
-        const [user] = await db.update(users).set({ isOrganiser }).where(eq2(users.id, id)).returning();
-        await this.userCache.delete(id);
-        await this.adminStatsCache.delete("stats");
-        return user;
-      }
-      async deleteUser(id) {
-        await db.transaction(async (tx) => {
-          await tx.update(systemSettings).set({ updatedBy: null }).where(eq2(systemSettings.updatedBy, id));
-          await tx.update(analytics).set({ userId: null }).where(eq2(analytics.userId, id));
-          await tx.delete(posts).where(eq2(posts.userId, id));
-          const userRequests = await tx.select().from(connectionRequests).where(or2(
-            eq2(connectionRequests.fromUserId, id),
-            eq2(connectionRequests.toUserId, id)
-          ));
-          if (userRequests.length > 0) {
-            const chatIds = userRequests.map((r) => r.id);
-            await tx.delete(messages).where(inArray2(messages.chatId, chatIds));
-          }
-          await tx.delete(connectionRequests).where(or2(
-            eq2(connectionRequests.fromUserId, id),
-            eq2(connectionRequests.toUserId, id)
-          ));
-          await tx.delete(notifications).where(eq2(notifications.userId, id));
-          await tx.delete(notifications).where(
-            sql3`json_extract(metadata, '$.senderId') = ${id}`
-          );
-          await tx.delete(users).where(eq2(users.id, id));
-        });
-        await this.userCache.delete(id);
-        await this.adminStatsCache.delete("stats");
-      }
-      async banUser(id, reason) {
-        const now = /* @__PURE__ */ new Date();
-        const [user] = await db.update(users).set({
-          isBanned: true,
-          banReason: reason,
-          bannedAt: now
-        }).where(eq2(users.id, id)).returning();
-        await this.userCache.delete(id);
-        await this.adminStatsCache.delete("stats");
-        return user;
-      }
-      async unbanUser(id) {
-        const [user] = await db.update(users).set({
-          isBanned: false,
-          banReason: null,
-          bannedAt: null
-        }).where(eq2(users.id, id)).returning();
-        await this.userCache.delete(id);
-        await this.adminStatsCache.delete("stats");
-        return user;
-      }
-      async adminDeletePost(id) {
-        await db.transaction(async (tx) => {
-          const requests = await tx.select().from(connectionRequests).where(eq2(connectionRequests.postId, id));
-          if (requests.length > 0) {
-            const chatIds = requests.map((r) => r.id);
-            await tx.delete(messages).where(inArray2(messages.chatId, chatIds));
-          }
-          await tx.delete(connectionRequests).where(eq2(connectionRequests.postId, id));
-          await tx.delete(posts).where(eq2(posts.id, id));
-        });
-        await this.postCache.delete(id);
-        await this.adminStatsCache.delete("stats");
-      }
-      async getAdminStats() {
-        const userCount = await db.select({ count: sql3`count(*)` }).from(users);
-        const postCount = await db.select({ count: sql3`count(*)` }).from(posts);
-        const eventCount = await db.select({ count: sql3`count(*)` }).from(posts).where(isNotNull(posts.eventName));
-        const reportCount = await db.select({ count: sql3`count(*)` }).from(reports);
-        const pendingReportCount = await db.select({ count: sql3`count(*)` }).from(reports).where(eq2(reports.status, "pending"));
-        const postRows = await db.select({
-          createdAt: posts.createdAt,
-          userSkill: posts.userSkill,
-          requiredSkills: posts.requiredSkills,
-          skillsWanted: posts.skillsWanted,
-          skillsOffered: posts.skillsOffered
-        }).from(posts);
-        const postsByDate = {};
-        const skills = {};
-        const canonicalSkillLabel = /* @__PURE__ */ new Map();
-        const addSkill = (raw) => {
-          if (typeof raw !== "string") return;
-          const trimmed = raw.trim();
-          if (!trimmed) return;
-          const normalized = trimmed.toLowerCase();
-          const label = canonicalSkillLabel.get(normalized) || trimmed;
-          canonicalSkillLabel.set(normalized, label);
-          skills[label] = (skills[label] || 0) + 1;
+      const chats = reqs.map((req) => {
+        const isIncoming = req.toUserId === userId;
+        const partnerId = isIncoming ? req.fromUserId : req.toUserId;
+        const partnerUser = userMap.get(partnerId);
+        const partnerName = isIncoming ? req.fromUserName || partnerUser?.name || "Unknown User" : req.toUserName || partnerUser?.name || "Unknown User";
+        const partnerAvatar = partnerUser?.avatar || null;
+        const lastMsg = lastMessagesMap.get(req.id);
+        return {
+          id: req.id,
+          partnerName,
+          partnerId,
+          partnerAvatar,
+          lastMessage: lastMsg ? lastMsg.text : null,
+          timestamp: lastMsg ? new Date(lastMsg.timestamp) : req.createdAt,
+          unreadCount: 0
         };
-        for (const row of postRows) {
-          if (row.createdAt) {
-            const dateKey = row.createdAt.toISOString().slice(0, 10);
-            postsByDate[dateKey] = (postsByDate[dateKey] || 0) + 1;
+      });
+      return chats.sort((a, b) => {
+        const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+        const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+        return bTime - aTime;
+      });
+    } catch (error) {
+      logger.error("Error in getChats", error);
+      throw error;
+    }
+  }
+  async getMessages(chatId, userId, beforeTimestamp) {
+    let cutoffDate = /* @__PURE__ */ new Date(0);
+    if (userId) {
+      const request = await this.getConnectionRequest(chatId);
+      if (request) {
+        if (request.fromUserId === userId && request.fromUserLastCleared) {
+          cutoffDate = request.fromUserLastCleared;
+        } else if (request.toUserId === userId && request.toUserLastCleared) {
+          cutoffDate = request.toUserLastCleared;
+        }
+      }
+    }
+    const conditions = [
+      eq2(messages.chatId, chatId),
+      gt2(messages.timestamp, cutoffDate)
+    ];
+    if (beforeTimestamp) {
+      conditions.push(lt(messages.timestamp, beforeTimestamp));
+    }
+    return await db.select().from(messages).where(and2(...conditions)).orderBy(desc2(messages.timestamp)).limit(50).then((msgs) => msgs.reverse());
+  }
+  async createMessage(insertMessage) {
+    const [message] = await db.insert(messages).values(insertMessage).returning();
+    await db.update(connectionRequests).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq2(connectionRequests.id, insertMessage.chatId));
+    return message;
+  }
+  async clearChatHistory(chatId, userId) {
+    const request = await this.getConnectionRequest(chatId);
+    if (!request) throw new Error("Chat not found");
+    const now = /* @__PURE__ */ new Date();
+    if (request.fromUserId === userId) {
+      await db.update(connectionRequests).set({ fromUserLastCleared: now }).where(eq2(connectionRequests.id, chatId));
+    } else if (request.toUserId === userId) {
+      await db.update(connectionRequests).set({ toUserLastCleared: now }).where(eq2(connectionRequests.id, chatId));
+    } else {
+      throw new Error("User is not part of this chat");
+    }
+  }
+  // Notifications
+  async getNotifications(userId, limit = 50) {
+    return await db.select().from(notifications).where(eq2(notifications.userId, userId)).orderBy(desc2(notifications.createdAt)).limit(limit);
+  }
+  async createNotification(notification) {
+    const [newNotification] = await db.insert(notifications).values(notification).returning();
+    return newNotification;
+  }
+  async markNotificationsRead(userId, ids) {
+    if (ids.length === 0) return;
+    await db.update(notifications).set({ isRead: true }).where(
+      and2(
+        eq2(notifications.userId, userId),
+        inArray2(notifications.id, ids)
+      )
+    );
+  }
+  async markAllNotificationsRead(userId) {
+    await db.update(notifications).set({ isRead: true }).where(eq2(notifications.userId, userId));
+  }
+  async deleteNotifications(userId, ids) {
+    if (ids.length === 0) return;
+    await db.delete(notifications).where(
+      and2(
+        eq2(notifications.userId, userId),
+        inArray2(notifications.id, ids)
+      )
+    );
+  }
+  async deleteAllNotifications(userId) {
+    await db.transaction(async (tx) => {
+      await tx.delete(notifications).where(eq2(notifications.userId, userId));
+    });
+  }
+  async getUnreadNotificationsCount(userId) {
+    const [result] = await db.select({ count: sql3`count(*)` }).from(notifications).where(and2(eq2(notifications.userId, userId), eq2(notifications.isRead, false)));
+    return Number(result?.count || 0);
+  }
+  // Analytics
+  async logEvent(event) {
+    await db.insert(analytics).values(event);
+  }
+  // Admin
+  async promoteUser(id, isAdmin) {
+    const [user] = await db.update(users).set({ isAdmin }).where(eq2(users.id, id)).returning();
+    await this.userCache.delete(id);
+    await this.adminStatsCache.delete("stats");
+    return user;
+  }
+  async promoteOrganiser(id, isOrganiser) {
+    const [user] = await db.update(users).set({ isOrganiser }).where(eq2(users.id, id)).returning();
+    await this.userCache.delete(id);
+    await this.adminStatsCache.delete("stats");
+    return user;
+  }
+  async deleteUser(id) {
+    await db.transaction(async (tx) => {
+      await tx.update(systemSettings).set({ updatedBy: null }).where(eq2(systemSettings.updatedBy, id));
+      await tx.update(analytics).set({ userId: null }).where(eq2(analytics.userId, id));
+      await tx.delete(posts).where(eq2(posts.userId, id));
+      const userRequests = await tx.select().from(connectionRequests).where(or2(
+        eq2(connectionRequests.fromUserId, id),
+        eq2(connectionRequests.toUserId, id)
+      ));
+      if (userRequests.length > 0) {
+        const chatIds = userRequests.map((r) => r.id);
+        await tx.delete(messages).where(inArray2(messages.chatId, chatIds));
+      }
+      await tx.delete(connectionRequests).where(or2(
+        eq2(connectionRequests.fromUserId, id),
+        eq2(connectionRequests.toUserId, id)
+      ));
+      await tx.delete(notifications).where(eq2(notifications.userId, id));
+      await tx.delete(notifications).where(
+        sql3`json_extract(metadata, '$.senderId') = ${id}`
+      );
+      await tx.delete(users).where(eq2(users.id, id));
+    });
+    await this.userCache.delete(id);
+    await this.adminStatsCache.delete("stats");
+  }
+  async banUser(id, reason) {
+    const now = /* @__PURE__ */ new Date();
+    const [user] = await db.update(users).set({
+      isBanned: true,
+      banReason: reason,
+      bannedAt: now
+    }).where(eq2(users.id, id)).returning();
+    await this.userCache.delete(id);
+    await this.adminStatsCache.delete("stats");
+    return user;
+  }
+  async unbanUser(id) {
+    const [user] = await db.update(users).set({
+      isBanned: false,
+      banReason: null,
+      bannedAt: null
+    }).where(eq2(users.id, id)).returning();
+    await this.userCache.delete(id);
+    await this.adminStatsCache.delete("stats");
+    return user;
+  }
+  async adminDeletePost(id) {
+    await db.transaction(async (tx) => {
+      const requests = await tx.select().from(connectionRequests).where(eq2(connectionRequests.postId, id));
+      if (requests.length > 0) {
+        const chatIds = requests.map((r) => r.id);
+        await tx.delete(messages).where(inArray2(messages.chatId, chatIds));
+      }
+      await tx.delete(connectionRequests).where(eq2(connectionRequests.postId, id));
+      await tx.delete(posts).where(eq2(posts.id, id));
+    });
+    await this.postCache.delete(id);
+    await this.adminStatsCache.delete("stats");
+  }
+  async getAdminStats() {
+    const userCount = await db.select({ count: sql3`count(*)` }).from(users);
+    const postCount = await db.select({ count: sql3`count(*)` }).from(posts);
+    const eventCount = await db.select({ count: sql3`count(*)` }).from(posts).where(isNotNull(posts.eventName));
+    const reportCount = await db.select({ count: sql3`count(*)` }).from(reports);
+    const pendingReportCount = await db.select({ count: sql3`count(*)` }).from(reports).where(eq2(reports.status, "pending"));
+    const postRows = await db.select({
+      createdAt: posts.createdAt,
+      userSkill: posts.userSkill,
+      requiredSkills: posts.requiredSkills,
+      skillsWanted: posts.skillsWanted,
+      skillsOffered: posts.skillsOffered
+    }).from(posts);
+    const postsByDate = {};
+    const skills = {};
+    const canonicalSkillLabel = /* @__PURE__ */ new Map();
+    const addSkill = (raw) => {
+      if (typeof raw !== "string") return;
+      const trimmed = raw.trim();
+      if (!trimmed) return;
+      const normalized = trimmed.toLowerCase();
+      const label = canonicalSkillLabel.get(normalized) || trimmed;
+      canonicalSkillLabel.set(normalized, label);
+      skills[label] = (skills[label] || 0) + 1;
+    };
+    for (const row of postRows) {
+      if (row.createdAt) {
+        const dateKey = row.createdAt.toISOString().slice(0, 10);
+        postsByDate[dateKey] = (postsByDate[dateKey] || 0) + 1;
+      }
+      addSkill(row.userSkill);
+      if (Array.isArray(row.requiredSkills)) {
+        for (const skill of row.requiredSkills) addSkill(skill);
+      }
+      if (Array.isArray(row.skillsWanted)) {
+        for (const skill of row.skillsWanted) {
+          if (typeof skill === "string") {
+            addSkill(skill);
+            continue;
           }
-          addSkill(row.userSkill);
-          if (Array.isArray(row.requiredSkills)) {
-            for (const skill of row.requiredSkills) addSkill(skill);
-          }
-          if (Array.isArray(row.skillsWanted)) {
-            for (const skill of row.skillsWanted) {
-              if (typeof skill === "string") {
-                addSkill(skill);
-                continue;
-              }
-              if (skill && typeof skill === "object" && "name" in skill) {
-                addSkill(skill.name);
-              }
-            }
-          }
-          if (Array.isArray(row.skillsOffered)) {
-            for (const skill of row.skillsOffered) {
-              if (typeof skill === "string") {
-                addSkill(skill);
-                continue;
-              }
-              if (skill && typeof skill === "object" && "name" in skill) {
-                addSkill(skill.name);
-              }
-            }
+          if (skill && typeof skill === "object" && "name" in skill) {
+            addSkill(skill.name);
           }
         }
-        const stats = {
-          totalUsers: Number(userCount[0].count),
-          totalPosts: Number(postCount[0].count),
-          totalEvents: Number(eventCount[0].count),
-          totalReports: Number(reportCount[0].count),
-          pendingReports: Number(pendingReportCount[0].count),
-          postsByDate,
-          skills
-        };
-        return stats;
       }
-      async getAnalytics(startDate, endDate, limit = 100, offset = 0) {
-        let query = db.select().from(analytics).orderBy(desc2(analytics.timestamp));
-        const conditions = [];
-        if (startDate) conditions.push(sql3`${analytics.timestamp} >= ${startDate}`);
-        if (endDate) conditions.push(sql3`${analytics.timestamp} <= ${endDate}`);
-        if (conditions.length === 1) {
-          return await query.where(conditions[0]).limit(limit).offset(offset);
-        }
-        if (conditions.length > 1) {
-          const whereClause = conditions.slice(1).reduce((acc, condition) => and2(acc, condition), conditions[0]);
-          return await query.where(whereClause).limit(limit).offset(offset);
-        }
-        return await query.limit(limit).offset(offset);
-      }
-      // Auditing
-      async logAudit(log) {
-        const [newLog] = await db.insert(auditLogs).values(log).returning();
-        return newLog;
-      }
-      async getAuditLogs(limit = 100, startDate, endDate) {
-        const query = db.select().from(auditLogs);
-        const conditions = [];
-        if (startDate) conditions.push(gt2(auditLogs.timestamp, startDate));
-        if (endDate) conditions.push(lt(auditLogs.timestamp, endDate));
-        if (conditions.length === 1) {
-          return await query.where(conditions[0]).limit(limit).orderBy(desc2(auditLogs.timestamp));
-        }
-        if (conditions.length > 1) {
-          const whereClause = conditions.slice(1).reduce((acc, condition) => and2(acc, condition), conditions[0]);
-          return await query.where(whereClause).limit(limit).orderBy(desc2(auditLogs.timestamp));
-        }
-        return await query.limit(limit).orderBy(desc2(auditLogs.timestamp));
-      }
-      async clearAuditLogs() {
-        await db.delete(auditLogs);
-      }
-      // Reports
-      async createReport(report) {
-        const [newReport] = await db.insert(reports).values(report).returning();
-        return newReport;
-      }
-      async getReports(status, type, search) {
-        let query = db.select().from(reports);
-        const conditions = [];
-        if (status) conditions.push(eq2(reports.status, status));
-        if (type) conditions.push(eq2(reports.type, type));
-        if (search) {
-          const escapedSearch = search.replace(/[%_]/g, "\\$&");
-          const searchPattern = `%${escapedSearch}%`;
-          const searchCondition = or2(
-            sql3`LOWER(${reports.subject}) LIKE LOWER(${searchPattern}) ESCAPE '\\'`,
-            sql3`LOWER(${reports.description}) LIKE LOWER(${searchPattern}) ESCAPE '\\'`
-          );
-          if (searchCondition) {
-            conditions.push(searchCondition);
+      if (Array.isArray(row.skillsOffered)) {
+        for (const skill of row.skillsOffered) {
+          if (typeof skill === "string") {
+            addSkill(skill);
+            continue;
+          }
+          if (skill && typeof skill === "object" && "name" in skill) {
+            addSkill(skill.name);
           }
         }
-        if (conditions.length === 1) {
-          return await query.where(conditions[0]).orderBy(desc2(reports.createdAt));
-        }
-        if (conditions.length > 1) {
-          const whereClause = conditions.slice(1).reduce((acc, condition) => and2(acc, condition), conditions[0]);
-          return await query.where(whereClause).orderBy(desc2(reports.createdAt));
-        }
-        return await query.orderBy(desc2(reports.createdAt));
       }
-      async updateReportStatus(id, status, resolvedBy, adminNotes) {
-        const [updatedReport] = await db.update(reports).set({
-          status,
-          adminNotes: adminNotes || null,
-          resolvedAt: status === "resolved" ? /* @__PURE__ */ new Date() : null,
-          resolvedBy: status === "resolved" ? resolvedBy : null
-        }).where(eq2(reports.id, id)).returning();
-        return updatedReport;
+    }
+    const stats = {
+      totalUsers: Number(userCount[0].count),
+      totalPosts: Number(postCount[0].count),
+      totalEvents: Number(eventCount[0].count),
+      totalReports: Number(reportCount[0].count),
+      pendingReports: Number(pendingReportCount[0].count),
+      postsByDate,
+      skills
+    };
+    return stats;
+  }
+  async getAnalytics(startDate, endDate, limit = 100, offset = 0) {
+    let query = db.select().from(analytics).orderBy(desc2(analytics.timestamp));
+    const conditions = [];
+    if (startDate) conditions.push(sql3`${analytics.timestamp} >= ${startDate}`);
+    if (endDate) conditions.push(sql3`${analytics.timestamp} <= ${endDate}`);
+    if (conditions.length === 1) {
+      return await query.where(conditions[0]).limit(limit).offset(offset);
+    }
+    if (conditions.length > 1) {
+      const whereClause = conditions.slice(1).reduce((acc, condition) => and2(acc, condition), conditions[0]);
+      return await query.where(whereClause).limit(limit).offset(offset);
+    }
+    return await query.limit(limit).offset(offset);
+  }
+  // Auditing
+  async logAudit(log) {
+    const [newLog] = await db.insert(auditLogs).values(log).returning();
+    return newLog;
+  }
+  async getAuditLogs(limit = 100, startDate, endDate) {
+    const query = db.select().from(auditLogs);
+    const conditions = [];
+    if (startDate) conditions.push(gt2(auditLogs.timestamp, startDate));
+    if (endDate) conditions.push(lt(auditLogs.timestamp, endDate));
+    if (conditions.length === 1) {
+      return await query.where(conditions[0]).limit(limit).orderBy(desc2(auditLogs.timestamp));
+    }
+    if (conditions.length > 1) {
+      const whereClause = conditions.slice(1).reduce((acc, condition) => and2(acc, condition), conditions[0]);
+      return await query.where(whereClause).limit(limit).orderBy(desc2(auditLogs.timestamp));
+    }
+    return await query.limit(limit).orderBy(desc2(auditLogs.timestamp));
+  }
+  async clearAuditLogs() {
+    await db.delete(auditLogs);
+  }
+  // Reports
+  async createReport(report) {
+    const [newReport] = await db.insert(reports).values(report).returning();
+    return newReport;
+  }
+  async getReports(status, type, search) {
+    let query = db.select().from(reports);
+    const conditions = [];
+    if (status) conditions.push(eq2(reports.status, status));
+    if (type) conditions.push(eq2(reports.type, type));
+    if (search) {
+      const escapedSearch = search.replace(/[%_]/g, "\\$&");
+      const searchPattern = `%${escapedSearch}%`;
+      const searchCondition = or2(
+        sql3`LOWER(${reports.subject}) LIKE LOWER(${searchPattern}) ESCAPE '\\'`,
+        sql3`LOWER(${reports.description}) LIKE LOWER(${searchPattern}) ESCAPE '\\'`
+      );
+      if (searchCondition) {
+        conditions.push(searchCondition);
       }
-      async deleteReport(id) {
-        await db.delete(reports).where(eq2(reports.id, id));
-      }
-      async deleteReports(ids) {
-        if (ids.length === 0) return;
-        await db.delete(reports).where(inArray2(reports.id, ids));
-      }
-      async deleteAllReports() {
-        await db.delete(reports);
-      }
-      // Feedback
-      async createFeedback(data) {
-        const [newFeedback] = await db.insert(feedback).values(data).returning();
-        return newFeedback;
-      }
-      async getFeedback(limit = 100) {
-        return await db.select({
-          id: feedback.id,
-          userId: feedback.userId,
-          rating: feedback.rating,
-          comment: feedback.comment,
-          timestamp: feedback.timestamp,
-          userName: users.name
-        }).from(feedback).leftJoin(users, eq2(feedback.userId, users.id)).orderBy(desc2(feedback.timestamp)).limit(limit);
-      }
-      // System Settings
-      async getSystemSetting(key) {
-        const cached = this.settingCache.get(key);
-        if (cached && cached.expires > Date.now()) {
-          return cached.value;
-        }
-        const pending = this.pendingSettings.get(key);
-        if (pending) {
-          return await pending;
-        }
-        const fetchPromise = (async () => {
-          try {
-            const [setting] = await db.select().from(systemSettings).where(eq2(systemSettings.key, key));
-            this.settingCache.set(key, { value: setting, expires: Date.now() + 6e4 });
-            return setting;
-          } finally {
-            this.pendingSettings.delete(key);
-          }
-        })();
-        this.pendingSettings.set(key, fetchPromise);
-        return await fetchPromise;
-      }
-      async setSystemSetting(key, value, userId) {
-        const [setting] = await db.insert(systemSettings).values({ key, value, updatedBy: userId }).onConflictDoUpdate({
-          target: systemSettings.key,
-          set: { value, updatedBy: userId, updatedAt: /* @__PURE__ */ new Date() }
-        }).returning();
+    }
+    if (conditions.length === 1) {
+      return await query.where(conditions[0]).orderBy(desc2(reports.createdAt));
+    }
+    if (conditions.length > 1) {
+      const whereClause = conditions.slice(1).reduce((acc, condition) => and2(acc, condition), conditions[0]);
+      return await query.where(whereClause).orderBy(desc2(reports.createdAt));
+    }
+    return await query.orderBy(desc2(reports.createdAt));
+  }
+  async updateReportStatus(id, status, resolvedBy, adminNotes) {
+    const [updatedReport] = await db.update(reports).set({
+      status,
+      adminNotes: adminNotes || null,
+      resolvedAt: status === "resolved" ? /* @__PURE__ */ new Date() : null,
+      resolvedBy: status === "resolved" ? resolvedBy : null
+    }).where(eq2(reports.id, id)).returning();
+    return updatedReport;
+  }
+  async deleteReport(id) {
+    await db.delete(reports).where(eq2(reports.id, id));
+  }
+  async deleteReports(ids) {
+    if (ids.length === 0) return;
+    await db.delete(reports).where(inArray2(reports.id, ids));
+  }
+  async deleteAllReports() {
+    await db.delete(reports);
+  }
+  // Feedback
+  async createFeedback(data) {
+    const [newFeedback] = await db.insert(feedback).values(data).returning();
+    return newFeedback;
+  }
+  async getFeedback(limit = 100) {
+    return await db.select({
+      id: feedback.id,
+      userId: feedback.userId,
+      rating: feedback.rating,
+      comment: feedback.comment,
+      timestamp: feedback.timestamp,
+      userName: users.name
+    }).from(feedback).leftJoin(users, eq2(feedback.userId, users.id)).orderBy(desc2(feedback.timestamp)).limit(limit);
+  }
+  // System Settings
+  async getSystemSetting(key) {
+    const cached = this.settingCache.get(key);
+    if (cached && cached.expires > Date.now()) {
+      return cached.value;
+    }
+    const pending = this.pendingSettings.get(key);
+    if (pending) {
+      return await pending;
+    }
+    const fetchPromise = (async () => {
+      try {
+        const [setting] = await db.select().from(systemSettings).where(eq2(systemSettings.key, key));
         this.settingCache.set(key, { value: setting, expires: Date.now() + 6e4 });
         return setting;
+      } finally {
+        this.pendingSettings.delete(key);
       }
-      // Behavioral Tracking & Recommendations
-      async trackPostInteraction(userId, postId, interactionType, durationSeconds, metadata) {
-        try {
-          await db.insert(postInteractions).values({
-            userId,
-            postId,
-            interactionType,
-            durationSeconds: durationSeconds || 0,
-            metadata: metadata || null
-          });
-          if (interactionType === "connection_request" || interactionType === "click" || interactionType === "interested" || interactionType === "not_interested") {
-            const { updateUserPreferencesFromInteractions: updateUserPreferencesFromInteractions2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-            updateUserPreferencesFromInteractions2(userId).catch((error) => {
-              logger.error("Failed immediate preference refresh", { error, userId, interactionType });
-            });
-          }
-          this.updateUserPreferencesDebounced(userId);
-        } catch (error) {
-          logger.error("Failed to track post interaction", { error, userId, postId, interactionType });
-        }
-      }
-      async trackUserSearch(userId, query, filters, resultsCount, clickedPostIds) {
-        try {
-          const normalizedQuery = (query || "").trim().toLowerCase();
-          const normalizedFilters = filters && typeof filters === "object" ? filters : {};
-          const uniqueClickedPostIds = Array.from(new Set((clickedPostIds || []).filter(Boolean)));
-          const hasFilter = Object.values(normalizedFilters).some(
-            (value) => typeof value === "string" ? value.trim().length > 0 : Boolean(value)
-          );
-          if (!normalizedQuery && !hasFilter && uniqueClickedPostIds.length === 0) {
-            return;
-          }
-          await db.insert(userSearches).values({
-            userId,
-            query: normalizedQuery,
-            filters: normalizedFilters,
-            resultsCount,
-            clickedPostIds: uniqueClickedPostIds
-          });
-        } catch (error) {
-          logger.error("Failed to track user search", { error, userId, query });
-        }
-      }
-      async getRecommendedPostIds(userId, limit = 20) {
-        try {
-          const { getRecommendedPosts: getRecommendedPosts2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-          const recentInteractions = await db.select({ postId: postInteractions.postId }).from(postInteractions).where(eq2(postInteractions.userId, userId)).orderBy(desc2(postInteractions.createdAt)).limit(100);
-          const excludeIds = recentInteractions.map((i) => i.postId);
-          const recommendations = await getRecommendedPosts2(userId, excludeIds, limit);
-          return recommendations.map((r) => r.postId.toString());
-        } catch (error) {
-          logger.error("Failed to get recommendations", { error, userId });
-          return [];
-        }
-      }
-      async getSearchSuggestions(userId, limit = 5) {
-        try {
-          const { getSearchSuggestions: getSuggestions } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-          return await getSuggestions(userId, limit);
-        } catch (error) {
-          logger.error("Failed to get search suggestions", { error, userId });
-          return [];
-        }
-      }
-      async getPersonalizationMetrics(days = 30) {
-        const safeDays = Number.isFinite(days) ? Math.min(Math.max(days, 1), 365) : 30;
-        const [interactionAgg] = await db.select({
-          views: sql3`COUNT(*) FILTER (WHERE ${postInteractions.interactionType} = 'view')`,
-          clicks: sql3`COUNT(*) FILTER (WHERE ${postInteractions.interactionType} = 'click')`,
-          connections: sql3`COUNT(*) FILTER (WHERE ${postInteractions.interactionType} = 'connection_request')`,
-          total: sql3`COUNT(*)`
-        }).from(postInteractions).where(sql3`${postInteractions.createdAt} > unixepoch() - (${safeDays} * 86400)`);
-        const [searchAgg] = await db.select({ total: sql3`COUNT(*)` }).from(userSearches).where(sql3`${userSearches.createdAt} > unixepoch() - (${safeDays} * 86400)`);
-        const views = Number(interactionAgg?.views || 0);
-        const clicks = Number(interactionAgg?.clicks || 0);
-        const connections = Number(interactionAgg?.connections || 0);
-        const ctr = views > 0 ? clicks / views : 0;
-        const connectionRate = clicks > 0 ? connections / clicks : 0;
-        return {
-          ctr,
-          connectionRate,
-          trackedSearches: Number(searchAgg?.total || 0),
-          trackedInteractions: Number(interactionAgg?.total || 0)
-        };
-      }
-      // Debounce user preference updates (update at most once per 60 seconds per user)
-      preferenceUpdateTimers = /* @__PURE__ */ new Map();
-      updateUserPreferencesDebounced(userId) {
-        const existingTimer = this.preferenceUpdateTimers.get(userId);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-        }
-        const timer = setTimeout(async () => {
-          try {
-            const { updateUserPreferencesFromInteractions: updateUserPreferencesFromInteractions2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-            await updateUserPreferencesFromInteractions2(userId);
-            this.preferenceUpdateTimers.delete(userId);
-          } catch (error) {
-            logger.error("Failed to update user preferences", { error, userId });
-          }
-        }, 6e4);
-        this.preferenceUpdateTimers.set(userId, timer);
-      }
-    };
-    storage = new DatabaseStorage();
+    })();
+    this.pendingSettings.set(key, fetchPromise);
+    return await fetchPromise;
   }
-});
+  async setSystemSetting(key, value, userId) {
+    const [setting] = await db.insert(systemSettings).values({ key, value, updatedBy: userId }).onConflictDoUpdate({
+      target: systemSettings.key,
+      set: { value, updatedBy: userId, updatedAt: /* @__PURE__ */ new Date() }
+    }).returning();
+    this.settingCache.set(key, { value: setting, expires: Date.now() + 6e4 });
+    return setting;
+  }
+  // Behavioral Tracking & Recommendations
+  async trackPostInteraction(userId, postId, interactionType, durationSeconds, metadata) {
+    try {
+      await db.insert(postInteractions).values({
+        userId,
+        postId,
+        interactionType,
+        durationSeconds: durationSeconds || 0,
+        metadata: metadata || null
+      });
+      if (interactionType === "connection_request" || interactionType === "click" || interactionType === "interested" || interactionType === "not_interested") {
+        const { updateUserPreferencesFromInteractions: updateUserPreferencesFromInteractions2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
+        updateUserPreferencesFromInteractions2(userId).catch((error) => {
+          logger.error("Failed immediate preference refresh", { error, userId, interactionType });
+        });
+      }
+      this.updateUserPreferencesDebounced(userId);
+    } catch (error) {
+      logger.error("Failed to track post interaction", { error, userId, postId, interactionType });
+    }
+  }
+  async trackUserSearch(userId, query, filters, resultsCount, clickedPostIds) {
+    try {
+      const normalizedQuery = (query || "").trim().toLowerCase();
+      const normalizedFilters = filters && typeof filters === "object" ? filters : {};
+      const uniqueClickedPostIds = Array.from(new Set((clickedPostIds || []).filter(Boolean)));
+      const hasFilter = Object.values(normalizedFilters).some(
+        (value) => typeof value === "string" ? value.trim().length > 0 : Boolean(value)
+      );
+      if (!normalizedQuery && !hasFilter && uniqueClickedPostIds.length === 0) {
+        return;
+      }
+      await db.insert(userSearches).values({
+        userId,
+        query: normalizedQuery,
+        filters: normalizedFilters,
+        resultsCount,
+        clickedPostIds: uniqueClickedPostIds
+      });
+    } catch (error) {
+      logger.error("Failed to track user search", { error, userId, query });
+    }
+  }
+  async getRecommendedPostIds(userId, limit = 20) {
+    try {
+      const { getRecommendedPosts: getRecommendedPosts2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
+      const recentInteractions = await db.select({ postId: postInteractions.postId }).from(postInteractions).where(eq2(postInteractions.userId, userId)).orderBy(desc2(postInteractions.createdAt)).limit(100);
+      const excludeIds = recentInteractions.map((i) => i.postId);
+      const recommendations = await getRecommendedPosts2(userId, excludeIds, limit);
+      return recommendations.map((r) => r.postId.toString());
+    } catch (error) {
+      logger.error("Failed to get recommendations", { error, userId });
+      return [];
+    }
+  }
+  async getSearchSuggestions(userId, limit = 5) {
+    try {
+      const { getSearchSuggestions: getSuggestions } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
+      return await getSuggestions(userId, limit);
+    } catch (error) {
+      logger.error("Failed to get search suggestions", { error, userId });
+      return [];
+    }
+  }
+  async getPersonalizationMetrics(days = 30) {
+    const safeDays = Number.isFinite(days) ? Math.min(Math.max(days, 1), 365) : 30;
+    const [interactionAgg] = await db.select({
+      views: sql3`COUNT(*) FILTER (WHERE ${postInteractions.interactionType} = 'view')`,
+      clicks: sql3`COUNT(*) FILTER (WHERE ${postInteractions.interactionType} = 'click')`,
+      connections: sql3`COUNT(*) FILTER (WHERE ${postInteractions.interactionType} = 'connection_request')`,
+      total: sql3`COUNT(*)`
+    }).from(postInteractions).where(sql3`${postInteractions.createdAt} > unixepoch() - (${safeDays} * 86400)`);
+    const [searchAgg] = await db.select({ total: sql3`COUNT(*)` }).from(userSearches).where(sql3`${userSearches.createdAt} > unixepoch() - (${safeDays} * 86400)`);
+    const views = Number(interactionAgg?.views || 0);
+    const clicks = Number(interactionAgg?.clicks || 0);
+    const connections = Number(interactionAgg?.connections || 0);
+    const ctr = views > 0 ? clicks / views : 0;
+    const connectionRate = clicks > 0 ? connections / clicks : 0;
+    return {
+      ctr,
+      connectionRate,
+      trackedSearches: Number(searchAgg?.total || 0),
+      trackedInteractions: Number(interactionAgg?.total || 0)
+    };
+  }
+  // Debounce user preference updates (update at most once per 60 seconds per user)
+  preferenceUpdateTimers = /* @__PURE__ */ new Map();
+  updateUserPreferencesDebounced(userId) {
+    const existingTimer = this.preferenceUpdateTimers.get(userId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const { updateUserPreferencesFromInteractions: updateUserPreferencesFromInteractions2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
+        await updateUserPreferencesFromInteractions2(userId);
+        this.preferenceUpdateTimers.delete(userId);
+      } catch (error) {
+        logger.error("Failed to update user preferences", { error, userId });
+      }
+    }, 6e4);
+    this.preferenceUpdateTimers.set(userId, timer);
+  }
+};
+var storage = new DatabaseStorage();
+
+// lib/routes.ts
+init_schema_sqlite();
+init_constants();
+
+// lib/routes/events.ts
+init_db();
+init_schema_sqlite();
 
 // lib/matching.ts
 function computeMatchScore(studentSkills = [], studentInterests = [], requiredSkills = [], requiredInterests = []) {
@@ -1952,11 +2280,6 @@ function findIntersection(arr1, arr2) {
   const set1 = new Set(arr1.map((s) => s.toLowerCase()));
   return arr2.filter((item) => set1.has(item.toLowerCase()));
 }
-var init_matching = __esm({
-  "lib/matching.ts"() {
-    "use strict";
-  }
-});
 
 // lib/routes/events.ts
 import { eq as eq3, and as and3, or as or3, sql as sql4, inArray as inArray3, asc as asc2 } from "drizzle-orm";
@@ -2500,15 +2823,9 @@ async function getEventMatchScore(req, res, next) {
     next(error);
   }
 }
-var init_events = __esm({
-  "lib/routes/events.ts"() {
-    "use strict";
-    init_db();
-    init_storage();
-    init_schema_sqlite();
-    init_matching();
-  }
-});
+
+// lib/routes.ts
+import { z as z2 } from "zod";
 
 // lib/middleware/auth.ts
 function requireAuth(req, res, next) {
@@ -2520,6 +2837,7 @@ function requireAuth(req, res, next) {
   }
   next();
 }
+var requireVerifiedAuth = requireAuth;
 function getSuperAdminEmails() {
   return (process.env.SUPER_ADMIN_EMAILS || "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean);
 }
@@ -2555,146 +2873,114 @@ function requireOrganiser(req, res, next) {
 function optionalAuth(_req, _res, next) {
   next();
 }
-var requireVerifiedAuth;
-var init_auth = __esm({
-  "lib/middleware/auth.ts"() {
-    "use strict";
-    requireVerifiedAuth = requireAuth;
-  }
-});
 
-// lib/cloudinary.ts
-var cloudinary_exports = {};
-__export(cloudinary_exports, {
-  cloudinary: () => cloudinary,
-  deleteFromCloudinary: () => deleteFromCloudinary,
-  uploadToCloudinary: () => uploadToCloudinary
-});
-import { v2 as cloudinary } from "cloudinary";
-async function uploadToCloudinary(buffer, folder, publicIdPrefix) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      folder,
-      resource_type: "auto",
-      overwrite: false
-    };
-    if (publicIdPrefix) {
-      options.public_id = `${publicIdPrefix}-${Date.now()}`;
-    }
-    const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
-      if (error || !result) {
-        logger.error("Cloudinary upload failed", error);
-        return reject(error || new Error("Cloudinary upload returned no result"));
-      }
-      resolve({ url: result.secure_url, publicId: result.public_id });
-    });
-    stream.end(buffer);
-  });
-}
-async function deleteFromCloudinary(publicIdOrUrl) {
-  try {
-    let publicId = publicIdOrUrl;
-    if (publicIdOrUrl.startsWith("https://res.cloudinary.com/")) {
-      const parts = publicIdOrUrl.split("/upload/");
-      if (parts.length === 2) {
-        const afterUpload = parts[1].replace(/^v\d+\//, "");
-        publicId = afterUpload.replace(/\.[^.]+$/, "");
-      }
-    }
-    await cloudinary.uploader.destroy(publicId);
-  } catch (err) {
-    logger.error("Cloudinary delete failed", err);
-  }
-}
-var init_cloudinary = __esm({
-  "lib/cloudinary.ts"() {
-    "use strict";
-    init_logger();
-    if (process.env.CLOUDINARY_URL) {
-      cloudinary.config({ cloudinary_url: process.env.CLOUDINARY_URL, secure: true });
-    } else {
-      cloudinary.config({
-        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-        api_key: process.env.CLOUDINARY_API_KEY,
-        api_secret: process.env.CLOUDINARY_API_SECRET,
-        secure: true
-      });
-    }
-  }
-});
+// lib/routes.ts
+init_cloudinary();
+init_db();
+import multer from "multer";
+import path from "path";
 
-// lib/session.ts
-import { Store } from "express-session";
-import { eq as eq4, lt as lt2 } from "drizzle-orm";
-var TursoSessionStore, sessionStore;
-var init_session = __esm({
-  "lib/session.ts"() {
-    "use strict";
-    init_db();
-    init_schema_sqlite();
-    TursoSessionStore = class extends Store {
-      async get(sid, cb) {
-        try {
-          const [row] = await db.select().from(session).where(eq4(session.sid, sid));
-          if (!row || row.expire.getTime() < Date.now()) return cb(null, void 0);
-          cb(null, row.sess);
-        } catch (err) {
-          cb(err);
-        }
-      }
-      async set(sid, sess, cb) {
-        try {
-          const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
-          await db.insert(session).values({ sid, sess, expire }).onConflictDoUpdate({ target: session.sid, set: { sess, expire } });
-          cb?.();
-        } catch (err) {
-          cb?.(err);
-        }
-      }
-      async destroy(sid, cb) {
-        try {
-          await db.delete(session).where(eq4(session.sid, sid));
-          cb?.();
-        } catch (err) {
-          cb?.(err);
-        }
-      }
-      async touch(sid, sess, cb) {
-        try {
-          const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
-          await db.update(session).set({ expire }).where(eq4(session.sid, sid));
-          cb?.();
-        } catch (err) {
-          cb?.(err);
-        }
-      }
-      /** Called by the daily cron job, NOT by setInterval. */
-      async prune() {
-        const now = /* @__PURE__ */ new Date();
-        await db.delete(session).where(lt2(session.expire, now));
-      }
-    };
-    sessionStore = new TursoSessionStore();
-  }
-});
+// lib/auth.ts
+import express from "express";
+import passport from "passport";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import crypto from "crypto";
+init_logger();
 
 // lib/middleware.ts
-var middleware_exports = {};
-__export(middleware_exports, {
-  bootstrap: () => bootstrap,
-  doubleCsrfProtection: () => doubleCsrfProtection,
-  generateCsrfToken: () => generateCsrfToken,
-  loadUser: () => loadUser,
-  requireAdmin: () => requireAdmin2,
-  requireAuth: () => requireAuth2,
-  requireOrganiser: () => requireOrganiser2,
-  runMiddleware: () => runMiddleware,
-  sessionMiddleware: () => sessionMiddleware,
-  setCorsHeaders: () => setCorsHeaders
-});
 import session2 from "express-session";
+
+// lib/session.ts
+init_db();
+init_schema_sqlite();
+import { Store } from "express-session";
+import { eq as eq4, lt as lt2 } from "drizzle-orm";
+var TursoSessionStore = class extends Store {
+  async get(sid, cb) {
+    try {
+      const [row] = await db.select().from(session).where(eq4(session.sid, sid));
+      if (!row || row.expire.getTime() < Date.now()) return cb(null, void 0);
+      cb(null, row.sess);
+    } catch (err) {
+      cb(err);
+    }
+  }
+  async set(sid, sess, cb) {
+    try {
+      const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
+      await db.insert(session).values({ sid, sess, expire }).onConflictDoUpdate({ target: session.sid, set: { sess, expire } });
+      cb?.();
+    } catch (err) {
+      cb?.(err);
+    }
+  }
+  async destroy(sid, cb) {
+    try {
+      await db.delete(session).where(eq4(session.sid, sid));
+      cb?.();
+    } catch (err) {
+      cb?.(err);
+    }
+  }
+  async touch(sid, sess, cb) {
+    try {
+      const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
+      await db.update(session).set({ expire }).where(eq4(session.sid, sid));
+      cb?.();
+    } catch (err) {
+      cb?.(err);
+    }
+  }
+  /** Called by the daily cron job, NOT by setInterval. */
+  async prune() {
+    const now = /* @__PURE__ */ new Date();
+    await db.delete(session).where(lt2(session.expire, now));
+  }
+};
+var sessionStore = new TursoSessionStore();
+
+// lib/middleware.ts
 import { doubleCsrf } from "csrf-csrf";
 import cookieParser from "cookie-parser";
+var isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+var sessionMiddleware = session2({
+  store: sessionStore,
+  secret: process.env.SESSION_SECRET || "dev-secret-change-in-production",
+  resave: false,
+  saveUninitialized: false,
+  proxy: true,
+  cookie: {
+    secure: isProduction,
+    httpOnly: true,
+    maxAge: 3 * 24 * 60 * 60 * 1e3,
+    // 3 days
+    sameSite: "lax"
+  }
+});
+var {
+  generateToken: _generateCsrfToken,
+  doubleCsrfProtection: _doubleCsrfProtection
+} = doubleCsrf({
+  getSecret: () => process.env.CSRF_SECRET || "dev-csrf-secret-change-in-prod",
+  cookieName: "x-csrf-token",
+  cookieOptions: {
+    sameSite: "lax",
+    path: "/",
+    secure: isProduction,
+    httpOnly: false
+  },
+  size: 64,
+  ignoredMethods: ["GET", "HEAD", "OPTIONS"],
+  getTokenFromRequest: (req) => req.headers["x-csrf-token"],
+  getSessionIdentifier: (req) => req.sessionID || "anonymous"
+});
+var generateCsrfToken = () => "mock-csrf-token";
+var allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "https://findateammate.online",
+  "https://findateammate.info",
+  ...isProduction ? [] : ["http://localhost:5000", "http://localhost:5173", "http://localhost:3000"]
+].filter(Boolean);
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
@@ -2732,33 +3018,6 @@ async function loadUser(req) {
   } catch {
   }
 }
-function requireAuth2(req, res) {
-  if (!req.user) {
-    res.status(401).json({ message: "Authentication required" });
-    return false;
-  }
-  if (req.user.isBanned && !req.user.isAdmin) {
-    res.status(403).json({ message: "You have been banned", code: "USER_BANNED" });
-    return false;
-  }
-  return true;
-}
-function requireAdmin2(req, res) {
-  if (!requireAuth2(req, res)) return false;
-  if (!req.user.isAdmin) {
-    res.status(403).json({ message: "Forbidden: Admin access only" });
-    return false;
-  }
-  return true;
-}
-function requireOrganiser2(req, res) {
-  if (!requireAuth2(req, res)) return false;
-  if (!req.user.isOrganiser && !req.user.isAdmin) {
-    res.status(403).json({ message: "Forbidden: Organiser access only" });
-    return false;
-  }
-  return true;
-}
 async function bootstrap(req, res) {
   if (!res.cookie) {
     res.cookie = (name, val, opts) => {
@@ -2772,433 +3031,115 @@ async function bootstrap(req, res) {
   await loadUser(req);
   return true;
 }
-var isProduction, sessionMiddleware, _generateCsrfToken, _doubleCsrfProtection, generateCsrfToken, doubleCsrfProtection, allowedOrigins;
-var init_middleware = __esm({
-  "lib/middleware.ts"() {
-    "use strict";
-    init_session();
-    init_storage();
-    isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
-    sessionMiddleware = session2({
-      store: sessionStore,
-      secret: process.env.SESSION_SECRET || "dev-secret-change-in-production",
-      resave: false,
-      saveUninitialized: false,
-      proxy: true,
-      cookie: {
-        secure: isProduction,
-        httpOnly: true,
-        maxAge: 3 * 24 * 60 * 60 * 1e3,
-        // 3 days
-        sameSite: "lax"
-      }
-    });
-    ({
-      generateToken: _generateCsrfToken,
-      doubleCsrfProtection: _doubleCsrfProtection
-    } = doubleCsrf({
-      getSecret: () => process.env.CSRF_SECRET || "dev-csrf-secret-change-in-prod",
-      cookieName: "x-csrf-token",
-      cookieOptions: {
-        sameSite: "lax",
-        path: "/",
-        secure: isProduction,
-        httpOnly: false
-      },
-      size: 64,
-      ignoredMethods: ["GET", "HEAD", "OPTIONS"],
-      getTokenFromRequest: (req) => req.headers["x-csrf-token"],
-      getSessionIdentifier: (req) => req.sessionID || "anonymous"
-    }));
-    generateCsrfToken = () => "mock-csrf-token";
-    doubleCsrfProtection = (req, res, next) => next();
-    allowedOrigins = [
-      process.env.FRONTEND_URL,
-      "https://findateammate.online",
-      "https://findateammate.info",
-      ...isProduction ? [] : ["http://localhost:5000", "http://localhost:5173", "http://localhost:3000"]
-    ].filter(Boolean);
-  }
-});
-
-// lib/mail.ts
-var mail_exports = {};
-__export(mail_exports, {
-  NodemailerProvider: () => NodemailerProvider,
-  mailProvider: () => mailProvider,
-  sendConnectionRequestEmail: () => sendConnectionRequestEmail,
-  sendEventRegistrationStatusEmail: () => sendEventRegistrationStatusEmail,
-  sendNewChatMessageEmail: () => sendNewChatMessageEmail,
-  sendPostExpiringEmail: () => sendPostExpiringEmail,
-  sendResolutionEmail: () => sendResolutionEmail,
-  sendWelcomeEmail: () => sendWelcomeEmail
-});
-import nodemailer from "nodemailer";
-function getBaseTemplate(content, title) {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>${title}</title>
-      <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #334155; margin: 0; padding: 0; background-color: #f8fafc; }
-        .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
-        .header { background: ${BRAND_COLOR}; padding: 30px; text-align: center; }
-        .header h1 { color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
-        .logo-text-accent { color: #93c5fd; }
-        .content { padding: 40px 30px; }
-        .button { display: inline-block; padding: 14px 28px; background-color: ${BRAND_COLOR}; color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 25px 0; transition: background-color 0.2s; text-align: center; }
-        .button:hover { background-color: #1d4ed8; }
-        .footer { background: #f1f5f9; padding: 25px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #e2e8f0; }
-        .alert { background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; margin: 20px 0; color: #991b1b; border-radius: 4px; }
-        .alert-title { font-weight: 700; display: block; margin-bottom: 4px; color: #7f1d1d; }
-        h2 { color: #0f172a; margin-top: 0; font-size: 22px; }
-        ul { padding-left: 20px; margin-bottom: 25px; }
-        li { margin-bottom: 10px; }
-        hr { border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>Find<span class="logo-text-accent">A</span>Teammate</h1>
-        </div>
-        <div class="content">
-          ${content}
-        </div>
-        <div class="footer">
-          <p>${FOOTER_TEXT}</p>
-          <p>You received this email because you have an account on FindATeammate.<br/>
-          <a href="${process.env.FRONTEND_URL}" style="color: #64748b; text-decoration: underline;">Unsubscribe options</a></p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-}
-async function sendWelcomeEmail(email, name) {
-  const subject = "Welcome to the Community! \u{1F680}";
-  const content = `
-    <h2>Hello ${name},</h2>
-    <p>Welcome to <strong>FindATeammate</strong>! You've just joined a community of builders, designers, and visionaries ready to create something amazing.</p>
-    
-    <p>Here is what you can do right now:</p>
-    <ul>
-      <li><strong>Complete Profile:</strong> Showcase your skills and portfolio.</li>
-      <li><strong>Post a Request:</strong> Find the perfect teammate for your idea.</li>
-      <li><strong>Connect:</strong> Chat with others in real-time.</li>
-    </ul>
-
-    <div style="text-align: center;">
-      <a href="${process.env.FRONTEND_URL}/teammates" class="button">Start Browsing</a>
-    </div>
-    
-    <hr/>
-    <p>We can't wait to see what you build!</p>
-    <p>\u2014 The FindATeammate Team</p>
-  `;
-  return await mailProvider.send({
-    to: email,
-    subject,
-    text: `Welcome to FindATeammate, ${name}! Log in to start browsing.`,
-    html: getBaseTemplate(content, "Welcome!")
-  });
-}
-async function sendResolutionEmail(email, reportId, notes) {
-  const subject = `Update on Report #${reportId}`;
-  const content = `
-    <h2>Report Resolved</h2>
-    <p>We're writing to let you know that your report (ID: <strong>#${reportId}</strong>) has been reviewed and resolved.</p>
-    
-    <div style="background-color: #f1f5f9; padding: 20px; border-radius: 8px; margin: 25px 0;">
-      <strong style="color: #475569; display: block; margin-bottom: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Admin Notes</strong>
-      ${notes}
-    </div>
-
-    <p>Thank you for helping keep our community safe.</p>
-  `;
-  return await mailProvider.send({
-    to: email,
-    subject,
-    text: `Your report #${reportId} has been resolved. Notes: ${notes}`,
-    html: getBaseTemplate(content, "Report Update")
-  });
-}
-async function sendConnectionRequestEmail(recipientEmail, recipientName, senderName, postTitle, message) {
-  const subject = `${senderName} wants to collaborate on "${postTitle}"`;
-  const content = `
-      <h2>Hello ${recipientName},</h2>
-      <p><strong>${senderName}</strong> has sent you a connection request for your post:</p>
-    
-      <div style="background-color: #f1f5f9; padding: 20px; border-radius: 8px; margin: 25px 0;">
-        <strong style="color: #0f172a; font-size: 18px; display: block; margin-bottom: 12px;">${postTitle}</strong>
-        ${message ? `<p style="color: #475569; margin: 0;"><em>"${message}"</em></p>` : ""}
-      </div>
-
-      <div style="text-align: center;">
-        <a href="${process.env.FRONTEND_URL}/requests" class="button">View Request</a>
-      </div>
-    
-      <p>Log in to accept or decline this request and start chatting!</p>
-      <p>\u2014 The FindATeammate Team</p>
-    `;
-  return await mailProvider.send({
-    to: recipientEmail,
-    subject,
-    text: `${senderName} sent you a connection request for "${postTitle}". Message: ${message}`,
-    html: getBaseTemplate(content, "New Connection Request")
-  });
-}
-async function sendEventRegistrationStatusEmail(userEmail, userName, eventName, status, rejectionReason) {
-  const isApproved = status === "approved";
-  const subject = isApproved ? `\u2705 You're in! Registration approved for "${eventName}"` : `Registration update for "${eventName}"`;
-  const content = isApproved ? `
-      <h2>Congratulations ${userName}! \u{1F389}</h2>
-      <p>Your registration for <strong>${eventName}</strong> has been <span style="color: #16a34a; font-weight: 700;">approved</span>!</p>
-    
-      <div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; padding: 20px; border-radius: 8px; margin: 25px 0;">
-        <p style="color: #15803d; margin: 0; font-weight: 600;">You're all set to participate! Check your dashboard for next steps.</p>
-      </div>
-
-      <div style="text-align: center;">
-        <a href="${process.env.FRONTEND_URL}/events" class="button">View Event Details</a>
-      </div>
-    ` : `
-      <h2>Hello ${userName},</h2>
-      <p>Thank you for your interest in <strong>${eventName}</strong>.</p>
-    
-      <div class="alert">
-        <span class="alert-title">Registration Not Approved</span>
-        Unfortunately, your registration was not approved at this time.
-        ${rejectionReason ? `<br/><br/><strong>Reason:</strong> ${rejectionReason}` : ""}
-      </div>
-
-      <p>Don't be discouraged! There are plenty of other amazing events and opportunities on FindATeammate.</p>
-    
-      <div style="text-align: center;">
-        <a href="${process.env.FRONTEND_URL}/events" class="button">Browse More Events</a>
-      </div>
-    `;
-  return await mailProvider.send({
-    to: userEmail,
-    subject,
-    text: isApproved ? `Your registration for "${eventName}" has been approved!` : `Your registration for "${eventName}" was not approved. ${rejectionReason || ""}`,
-    html: getBaseTemplate(content, "Event Registration Update")
-  });
-}
-async function sendNewChatMessageEmail(recipientEmail, recipientName, senderName, messagePreview) {
-  const subject = `New message from ${senderName}`;
-  const truncatedMessage = messagePreview.length > 100 ? messagePreview.substring(0, 100) + "..." : messagePreview;
-  const content = `
-      <h2>Hello ${recipientName},</h2>
-      <p><strong>${senderName}</strong> sent you a message:</p>
-    
-      <div style="background-color: #f8fafc; border-left: 4px solid ${BRAND_COLOR}; padding: 20px; border-radius: 8px; margin: 25px 0; font-style: italic; color: #475569;">
-        "${truncatedMessage}"
-      </div>
-
-      <div style="text-align: center;">
-        <a href="${process.env.FRONTEND_URL}/chat" class="button">Reply Now</a>
-      </div>
-    
-      <p style="font-size: 13px; color: #64748b;">You're receiving this because you have chat notifications enabled.</p>
-    `;
-  return await mailProvider.send({
-    to: recipientEmail,
-    subject,
-    text: `New message from ${senderName}: ${truncatedMessage}`,
-    html: getBaseTemplate(content, "New Message")
-  });
-}
-async function sendPostExpiringEmail(userEmail, userName, postTitle, _postId, daysLeft) {
-  const subject = `\u23F0 Your post "${postTitle}" expires in ${daysLeft} days`;
-  const content = `
-      <h2>Hello ${userName},</h2>
-      <p>Your post <strong>"${postTitle}"</strong> will expire in <strong>${daysLeft} day${daysLeft > 1 ? "s" : ""}</strong>.</p>
-    
-      <div style="background-color: #fff7ed; border-left: 4px solid #f59e0b; padding: 20px; border-radius: 8px; margin: 25px 0;">
-        <p style="color: #92400e; margin: 0;">If you're still looking for teammates, consider updating your post or creating a new one to stay visible!</p>
-      </div>
-
-      <div style="text-align: center;">
-        <a href="${process.env.FRONTEND_URL}/my-posts" class="button">Manage My Posts</a>
-      </div>
-    `;
-  return await mailProvider.send({
-    to: userEmail,
-    subject,
-    text: `Your post "${postTitle}" expires in ${daysLeft} days. Update it to stay visible!`,
-    html: getBaseTemplate(content, "Post Expiring Soon")
-  });
-}
-var NodemailerProvider, mailProvider, BRAND_COLOR, FOOTER_TEXT;
-var init_mail = __esm({
-  "lib/mail.ts"() {
-    "use strict";
-    init_logger();
-    NodemailerProvider = class {
-      transporter;
-      constructor() {
-        if (!process.env.SMTP_USER && process.env.NODE_ENV === "production") {
-          throw new Error("CRITICAL: SMTP_USER environment variable must be set in production");
-        }
-        if (!process.env.SMTP_PASS && process.env.NODE_ENV === "production") {
-          throw new Error("CRITICAL: SMTP_PASS environment variable must be set in production");
-        }
-        this.transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST || "smtp.gmail.com",
-          port: parseInt(process.env.SMTP_PORT || "465"),
-          secure: true,
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-          },
-          tls: {
-            // SECURITY FIX: Only disable certificate verification in development
-            rejectUnauthorized: process.env.NODE_ENV === "production"
-          }
-        });
-      }
-      async send(options) {
-        try {
-          const from = process.env.SMTP_FROM || '"FindATeammate Support" <support@findateammate.online>';
-          const info = await this.transporter.sendMail({
-            from,
-            ...options
-          });
-          logger.log(`Email sent: ${info.messageId}`);
-          return true;
-        } catch (error) {
-          logger.error("Nodemailer send error:", error);
-          return false;
-        }
-      }
-    };
-    mailProvider = new NodemailerProvider();
-    BRAND_COLOR = "#2563eb";
-    FOOTER_TEXT = "\xA9 2026 FindATeammate. All rights reserved.";
-  }
-});
 
 // lib/auth.ts
-import express from "express";
-import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import crypto from "crypto";
-var authApp, callbackURL;
-var init_auth2 = __esm({
-  "lib/auth.ts"() {
-    "use strict";
-    init_storage();
-    init_logger();
-    init_middleware();
-    authApp = express();
-    authApp.use(sessionMiddleware);
-    authApp.use(passport.initialize());
-    authApp.use(passport.session());
-    callbackURL = process.env.GOOGLE_CALLBACK_URL || "/api/auth/google/callback";
-    passport.use(new GoogleStrategy({
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL,
-      scope: ["profile", "email"],
-      state: true
-    }, async (_accessToken, _refreshToken, profile, done) => {
+var authApp = express();
+authApp.use(sessionMiddleware);
+authApp.use(passport.initialize());
+authApp.use(passport.session());
+var callbackURL = process.env.GOOGLE_CALLBACK_URL || "/api/auth/google/callback";
+passport.use(new GoogleStrategy({
+  clientID: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL,
+  scope: ["profile", "email"],
+  state: true
+}, async (_accessToken, _refreshToken, profile, done) => {
+  try {
+    const email = profile.emails?.[0].value;
+    if (!email) return done(new Error("No email found in Google profile"));
+    let user = await storage.getUserByGoogleId(profile.id);
+    if (user) return done(null, user);
+    user = await storage.getUserByEmail(email);
+    if (user) {
+      user = await storage.updateUser(user.id, {
+        googleId: profile.id,
+        authProvider: "google",
+        avatar: profile.photos?.[0].value || user.avatar
+      });
+      return done(null, user);
+    }
+    try {
+      user = await storage.createOAuthUser({
+        name: profile.displayName,
+        email,
+        username: `user_${crypto.randomBytes(4).toString("hex")}`,
+        googleId: profile.id,
+        avatar: profile.photos?.[0].value,
+        authProvider: "google",
+        skills: [],
+        bio: "",
+        portfolio: "",
+        github: "",
+        department: "OTHER",
+        city: "",
+        university: "",
+        privacy: { showEmail: false, showPortfolio: false, showUniversity: false, showCity: false }
+      });
       try {
-        const email = profile.emails?.[0].value;
-        if (!email) return done(new Error("No email found in Google profile"));
-        let user = await storage.getUserByGoogleId(profile.id);
-        if (user) return done(null, user);
-        user = await storage.getUserByEmail(email);
-        if (user) {
-          user = await storage.updateUser(user.id, {
-            googleId: profile.id,
-            authProvider: "google",
-            avatar: profile.photos?.[0].value || user.avatar
-          });
-          return done(null, user);
-        }
-        try {
-          user = await storage.createOAuthUser({
-            name: profile.displayName,
-            email,
-            username: `user_${crypto.randomBytes(4).toString("hex")}`,
-            googleId: profile.id,
-            avatar: profile.photos?.[0].value,
-            authProvider: "google",
-            skills: [],
-            bio: "",
-            portfolio: "",
-            github: "",
-            department: "OTHER",
-            city: "",
-            university: "",
-            privacy: { showEmail: false, showPortfolio: false, showUniversity: false, showCity: false }
-          });
-          try {
-            const { sendWelcomeEmail: sendWelcomeEmail2 } = await Promise.resolve().then(() => (init_mail(), mail_exports));
-            await sendWelcomeEmail2(user.email, user.name || user.username || "there");
-          } catch (mailError) {
-            logger.error("Failed to send welcome email on registration", mailError);
-          }
-        } catch (insertError) {
-          user = await storage.getUserByGoogleId(profile.id) || await storage.getUserByEmail(email);
-          if (!user) return done(insertError);
-        }
-        return done(null, { ...user, isNewUser: true });
-      } catch (err) {
-        return done(err);
+        const { sendWelcomeEmail: sendWelcomeEmail2 } = await Promise.resolve().then(() => (init_mail(), mail_exports));
+        await sendWelcomeEmail2(user.email, user.name || user.username || "there");
+      } catch (mailError) {
+        logger.error("Failed to send welcome email on registration", mailError);
       }
-    }));
-    passport.serializeUser((user, done) => done(null, user.id));
-    passport.deserializeUser(async (id, done) => {
-      try {
-        const user = await storage.getUser(id);
-        done(null, user || null);
-      } catch (err) {
-        done(null, null);
-      }
-    });
-    authApp.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
-    authApp.get(
-      "/google/callback",
-      passport.authenticate("google", { failureRedirect: "/login?error=oauth_failed" }),
-      async (req, res) => {
-        const userBeforeRegen = req.user;
-        await new Promise((resolve, reject) => {
-          req.session.regenerate((err) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-        await new Promise((resolve, reject) => {
-          req.login(userBeforeRegen, (err) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-        const frontendUrl = process.env.FRONTEND_URL || "";
-        const hasSkills = Array.isArray(userBeforeRegen?.skills) && userBeforeRegen.skills.length > 0;
-        const hasCity = Boolean((userBeforeRegen?.city || "").trim());
-        const hasUniversity = Boolean((userBeforeRegen?.university || "").trim());
-        const normalizedDepartment = String(userBeforeRegen?.department || "").trim().toUpperCase();
-        const hasDepartment = normalizedDepartment.length > 0 && normalizedDepartment !== "OTHER";
-        const isNewUser = userBeforeRegen?.isNewUser || !(hasSkills && hasCity && hasUniversity && hasDepartment);
-        if (isNewUser) {
-          return res.redirect(`${frontendUrl}/onboarding`);
-        }
-        res.redirect(`${frontendUrl}/`);
-      }
-    );
+    } catch (insertError) {
+      user = await storage.getUserByGoogleId(profile.id) || await storage.getUserByEmail(email);
+      if (!user) return done(insertError);
+    }
+    return done(null, { ...user, isNewUser: true });
+  } catch (err) {
+    return done(err);
+  }
+}));
+passport.serializeUser((user, done) => done(null, user.id));
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await storage.getUser(id);
+    done(null, user || null);
+  } catch (err) {
+    done(null, null);
   }
 });
+authApp.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
+authApp.get(
+  "/google/callback",
+  passport.authenticate("google", { failureRedirect: "/login?error=oauth_failed" }),
+  async (req, res) => {
+    const userBeforeRegen = req.user;
+    await new Promise((resolve, reject) => {
+      req.session.regenerate((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    await new Promise((resolve, reject) => {
+      req.login(userBeforeRegen, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    const frontendUrl = process.env.FRONTEND_URL || "";
+    const hasSkills = Array.isArray(userBeforeRegen?.skills) && userBeforeRegen.skills.length > 0;
+    const hasCity = Boolean((userBeforeRegen?.city || "").trim());
+    const hasUniversity = Boolean((userBeforeRegen?.university || "").trim());
+    const normalizedDepartment = String(userBeforeRegen?.department || "").trim().toUpperCase();
+    const hasDepartment = normalizedDepartment.length > 0 && normalizedDepartment !== "OTHER";
+    const isNewUser = userBeforeRegen?.isNewUser || !(hasSkills && hasCity && hasUniversity && hasDepartment);
+    if (isNewUser) {
+      return res.redirect(`${frontendUrl}/onboarding`);
+    }
+    res.redirect(`${frontendUrl}/`);
+  }
+);
 
 // lib/routes/auth-local.ts
+init_db();
+init_schema_sqlite();
+init_logger();
 import { Router } from "express";
 import { eq as eq5 } from "drizzle-orm";
 import crypto2 from "crypto";
+var authLocalRouter = Router();
 function verifyPassword(password, storedHash) {
   if (!storedHash) return false;
   const [salt, key] = storedHash.split(":");
@@ -3211,81 +3152,79 @@ function hashPassword(password) {
   const derivedKey = crypto2.scryptSync(password, salt, 64).toString("hex");
   return `${salt}:${derivedKey}`;
 }
-var authLocalRouter;
-var init_auth_local = __esm({
-  "lib/routes/auth-local.ts"() {
-    "use strict";
-    init_db();
-    init_schema_sqlite();
-    init_logger();
-    authLocalRouter = Router();
-    authLocalRouter.post("/login", async (req, res) => {
-      try {
-        const { email, password } = req.body;
-        if (!email || !password) {
-          return res.status(400).json({ message: "Email and password are required" });
-        }
-        const existingUsers = await db.select().from(users).where(eq5(users.email, email)).limit(1);
-        const user = existingUsers[0];
-        if (!user || !user.password) {
-          return res.status(401).json({ message: "Invalid email or password" });
-        }
-        const isValid = verifyPassword(password, user.password);
-        if (!isValid) {
-          return res.status(401).json({ message: "Invalid email or password" });
-        }
-        req.session.userId = user.id;
-        await new Promise((resolve, reject) => {
-          req.session.save((err) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-        const { password: _, ...safeUser } = user;
-        res.status(200).json(safeUser);
-      } catch (error) {
-        logger.error("Login error", error);
-        res.status(500).json({ message: "Internal server error" });
-      }
+authLocalRouter.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+    const existingUsers = await db.select().from(users).where(eq5(users.email, email)).limit(1);
+    const user = existingUsers[0];
+    if (!user || !user.password) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+    const isValid = verifyPassword(password, user.password);
+    if (!isValid) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+    req.session.userId = user.id;
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
-    authLocalRouter.post("/register", async (req, res) => {
-      try {
-        const { email, password, name } = req.body;
-        if (!email || !password || !name) {
-          return res.status(400).json({ message: "Email, password, and name are required" });
-        }
-        const existingUser = await db.select().from(users).where(eq5(users.email, email)).limit(1);
-        if (existingUser.length > 0) {
-          return res.status(409).json({ message: "Email already in use" });
-        }
-        const hashedPassword = hashPassword(password);
-        const username = `user_${crypto2.randomBytes(4).toString("hex")}`;
-        const [newUser] = await db.insert(users).values({
-          email,
-          name,
-          username,
-          password: hashedPassword,
-          authProvider: "local",
-          skills: [],
-          bio: "",
-          portfolio: "",
-          github: "",
-          department: "OTHER",
-          city: "",
-          university: "",
-          privacy: { showEmail: false, showPortfolio: false, showUniversity: false, showCity: false }
-        }).returning();
-        res.status(201).json(newUser);
-      } catch (error) {
-        logger.error("Registration error", error);
-        res.status(500).json({ message: "Internal server error" });
-      }
-    });
+    const { password: _, ...safeUser } = user;
+    res.status(200).json(safeUser);
+  } catch (error) {
+    logger.error("Login error", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+authLocalRouter.post("/register", async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+    if (!email || !password || !name) {
+      return res.status(400).json({ message: "Email, password, and name are required" });
+    }
+    const existingUser = await db.select().from(users).where(eq5(users.email, email)).limit(1);
+    if (existingUser.length > 0) {
+      return res.status(409).json({ message: "Email already in use" });
+    }
+    const hashedPassword = hashPassword(password);
+    const username = `user_${crypto2.randomBytes(4).toString("hex")}`;
+    const [newUser] = await db.insert(users).values({
+      email,
+      name,
+      username,
+      password: hashedPassword,
+      authProvider: "local",
+      skills: [],
+      bio: "",
+      portfolio: "",
+      github: "",
+      department: "OTHER",
+      city: "",
+      university: "",
+      privacy: { showEmail: false, showPortfolio: false, showUniversity: false, showCity: false }
+    }).returning();
+    res.status(201).json(newUser);
+  } catch (error) {
+    logger.error("Registration error", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
+// lib/routes/internal.ts
+import { Router as Router2 } from "express";
+
 // lib/audit-scheduler.ts
+init_db();
+init_schema_sqlite();
+init_logger();
+init_mail();
 import { and as and4, gte, lt as lt3 } from "drizzle-orm";
+var mailProvider2 = new NodemailerProvider();
 async function exportAuditLogsToCSV(startDate, endDate) {
   const logs = await db.select().from(auditLogs).where(
     and4(
@@ -3358,19 +3297,11 @@ Please find the attached CSV file with all audit trail entries for this week.`,
     throw error;
   }
 }
-var mailProvider2;
-var init_audit_scheduler = __esm({
-  "lib/audit-scheduler.ts"() {
-    "use strict";
-    init_db();
-    init_schema_sqlite();
-    init_logger();
-    init_mail();
-    mailProvider2 = new NodemailerProvider();
-  }
-});
 
 // lib/cleanup-helpers.ts
+init_db();
+init_schema_sqlite();
+init_logger();
 import { lt as lt4, and as and5, inArray as inArray4, isNull as isNull2, lte, isNotNull as isNotNull2, sql as sql5 } from "drizzle-orm";
 async function cleanupOldContent() {
   const now = /* @__PURE__ */ new Date();
@@ -3467,143 +3398,115 @@ async function cleanupObservabilityLogs() {
     };
   }
 }
-var init_cleanup_helpers = __esm({
-  "lib/cleanup-helpers.ts"() {
-    "use strict";
-    init_db();
-    init_schema_sqlite();
-    init_logger();
-  }
-});
 
 // lib/routes/internal.ts
-import { Router as Router2 } from "express";
-var internalRouter;
-var init_internal = __esm({
-  "lib/routes/internal.ts"() {
-    "use strict";
-    init_audit_scheduler();
-    init_session();
-    init_cleanup_helpers();
-    init_logger();
-    internalRouter = Router2();
-    internalRouter.get("/run-audit-export", async (req, res) => {
-      const secret = req.headers["x-cron-secret"];
-      if (secret !== process.env.CRON_SECRET) {
-        logger.warn(`Unauthorized cron attempt: invalid CRON_SECRET`);
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      try {
-        await runWeeklyAuditExport();
-        return res.status(200).json({ ok: true, message: "Weekly audit export completed" });
-      } catch (err) {
-        logger.error("[audit-export-route] failed:", err);
-        return res.status(500).json({ ok: false, error: err.message });
-      }
-    });
-    internalRouter.use("/daily-cleanup", async (req, res) => {
-      if (req.method !== "GET" && req.method !== "POST") {
-        return res.status(405).json({ message: "Method Not Allowed" });
-      }
-      const authHeader = req.headers["x-cron-secret"];
-      if (process.env.CRON_SECRET && authHeader !== process.env.CRON_SECRET) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-      logger.log("Running daily cleanup jobs");
-      const jobs = [];
-      try {
-        await runWeeklyAuditExport();
-        jobs.push({ name: "audit", status: "success" });
-      } catch (err) {
-        logger.error("Audit export failed", err);
-        jobs.push({ name: "audit", status: "error", error: err.message });
-      }
-      try {
-        await sessionStore.prune();
-        jobs.push({ name: "session-prune", status: "success" });
-      } catch (err) {
-        logger.error("Session pruning failed", err);
-        jobs.push({ name: "session-prune", status: "error", error: err.message });
-      }
-      try {
-        await cleanupOldContent();
-        await cleanupObservabilityLogs();
-        jobs.push({ name: "cleanup", status: "success" });
-      } catch (err) {
-        logger.error("Cleanup failed", err);
-        jobs.push({ name: "cleanup", status: "error", error: err.message });
-      }
-      return res.status(200).json({ success: true, jobs });
-    });
+init_logger();
+var internalRouter = Router2();
+internalRouter.get("/run-audit-export", async (req, res) => {
+  const secret = req.headers["x-cron-secret"];
+  if (secret !== process.env.CRON_SECRET) {
+    logger.warn(`Unauthorized cron attempt: invalid CRON_SECRET`);
+    return res.status(403).json({ error: "Forbidden" });
   }
+  try {
+    await runWeeklyAuditExport();
+    return res.status(200).json({ ok: true, message: "Weekly audit export completed" });
+  } catch (err) {
+    logger.error("[audit-export-route] failed:", err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+internalRouter.use("/daily-cleanup", async (req, res) => {
+  if (req.method !== "GET" && req.method !== "POST") {
+    return res.status(405).json({ message: "Method Not Allowed" });
+  }
+  const authHeader = req.headers["x-cron-secret"];
+  if (process.env.CRON_SECRET && authHeader !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  logger.log("Running daily cleanup jobs");
+  const jobs = [];
+  try {
+    await runWeeklyAuditExport();
+    jobs.push({ name: "audit", status: "success" });
+  } catch (err) {
+    logger.error("Audit export failed", err);
+    jobs.push({ name: "audit", status: "error", error: err.message });
+  }
+  try {
+    await sessionStore.prune();
+    jobs.push({ name: "session-prune", status: "success" });
+  } catch (err) {
+    logger.error("Session pruning failed", err);
+    jobs.push({ name: "session-prune", status: "error", error: err.message });
+  }
+  try {
+    await cleanupOldContent();
+    await cleanupObservabilityLogs();
+    jobs.push({ name: "cleanup", status: "success" });
+  } catch (err) {
+    logger.error("Cleanup failed", err);
+    jobs.push({ name: "cleanup", status: "error", error: err.message });
+  }
+  return res.status(200).json({ success: true, jobs });
 });
 
 // lib/routes/websockets.ts
+init_db();
+init_schema_sqlite();
 import { Router as Router3 } from "express";
 import jwt from "jsonwebtoken";
 import { eq as eq6 } from "drizzle-orm";
-var websocketsRouter, WS_JWT_SECRET, WS_JWT_EXPIRES_IN;
-var init_websockets = __esm({
-  "lib/routes/websockets.ts"() {
-    "use strict";
-    init_db();
-    init_schema_sqlite();
-    init_auth();
-    websocketsRouter = Router3();
-    WS_JWT_SECRET = process.env.WS_JWT_SECRET;
-    WS_JWT_EXPIRES_IN = "8h";
-    websocketsRouter.get("/ws-token", requireAuth, (req, res) => {
-      const user = req.user;
-      if (user.isBanned) {
-        return res.status(403).json({ error: "Account suspended" });
-      }
-      const token = jwt.sign(
-        {
-          userId: user.id,
-          name: user.name,
-          isBanned: user.isBanned ?? false
-        },
-        WS_JWT_SECRET,
-        { expiresIn: WS_JWT_EXPIRES_IN }
-      );
-      res.setHeader("Cache-Control", "private, no-store");
-      return res.status(200).json({ token });
-    });
-    websocketsRouter.get("/chats/:id/check-participant", async (req, res) => {
-      const secret = req.headers["x-partykit-secret"];
-      if (secret !== process.env.PARTYKIT_SECRET) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      const userId = req.headers["x-user-id"];
-      const chatId = req.params.id;
-      if (!userId || !chatId) {
-        return res.status(400).json({ error: "Missing userId or chatId" });
-      }
-      const [chat] = await db.select().from(connectionRequests).where(eq6(connectionRequests.id, chatId));
-      if (!chat) return res.status(404).json({ error: "Chat not found" });
-      const isParticipant = chat.fromUserId === userId || chat.toUserId === userId;
-      if (!isParticipant) return res.status(403).json({ error: "Not a participant" });
-      return res.status(200).json({ ok: true });
-    });
+var websocketsRouter = Router3();
+var WS_JWT_SECRET = process.env.WS_JWT_SECRET;
+var WS_JWT_EXPIRES_IN = "8h";
+websocketsRouter.get("/ws-token", requireAuth, (req, res) => {
+  const user = req.user;
+  if (user.isBanned) {
+    return res.status(403).json({ error: "Account suspended" });
   }
+  const token = jwt.sign(
+    {
+      userId: user.id,
+      name: user.name,
+      isBanned: user.isBanned ?? false
+    },
+    WS_JWT_SECRET,
+    { expiresIn: WS_JWT_EXPIRES_IN }
+  );
+  res.setHeader("Cache-Control", "private, no-store");
+  return res.status(200).json({ token });
+});
+websocketsRouter.get("/chats/:id/check-participant", async (req, res) => {
+  const secret = req.headers["x-partykit-secret"];
+  if (secret !== process.env.PARTYKIT_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const userId = req.headers["x-user-id"];
+  const chatId = req.params.id;
+  if (!userId || !chatId) {
+    return res.status(400).json({ error: "Missing userId or chatId" });
+  }
+  const [chat] = await db.select().from(connectionRequests).where(eq6(connectionRequests.id, chatId));
+  if (!chat) return res.status(404).json({ error: "Chat not found" });
+  const isParticipant = chat.fromUserId === userId || chat.toUserId === userId;
+  if (!isParticipant) return res.status(403).json({ error: "Not a participant" });
+  return res.status(200).json({ ok: true });
 });
 
 // lib/routes/security.ts
 import { Router as Router4 } from "express";
-var securityRouter;
-var init_security = __esm({
-  "lib/routes/security.ts"() {
-    "use strict";
-    init_middleware();
-    securityRouter = Router4();
-    securityRouter.get("/csrf-token", (req, res) => {
-      const token = generateCsrfToken();
-      res.status(200).json({ csrfToken: token });
-    });
-  }
+var securityRouter = Router4();
+securityRouter.get("/csrf-token", (req, res) => {
+  const token = generateCsrfToken();
+  res.status(200).json({ csrfToken: token });
 });
 
+// lib/routes.ts
+init_schema_sqlite();
+
 // lib/middleware/maintenance.ts
+init_logger();
 async function maintenanceMiddleware(req, res, next) {
   try {
     if (process.env.MAINTENANCE_MODE === "true") {
@@ -3666,25 +3569,54 @@ async function maintenanceMiddleware(req, res, next) {
     next();
   }
 }
-var init_maintenance = __esm({
-  "lib/middleware/maintenance.ts"() {
-    "use strict";
-    init_storage();
-    init_logger();
-  }
-});
 
 // lib/routes.ts
-var routes_exports = {};
-__export(routes_exports, {
-  app: () => app,
-  registerRoutes: () => registerRoutes
-});
-import express2 from "express";
-import { z as z2 } from "zod";
-import multer from "multer";
-import path from "path";
 import { sql as sql6, eq as eq7, and as and6, not as not2, isNull as isNull3, gt as gt3, inArray as inArray5, desc as desc3 } from "drizzle-orm";
+var app = express2();
+app.use(express2.json({ limit: "50mb" }));
+app.use(express2.urlencoded({ extended: false, limit: "50mb" }));
+var rateLimit = (options) => (req, res, next) => next();
+var ipKeyGenerator = (ip) => ip;
+var voteLimiter = rateLimit({
+  windowMs: 1 * 60 * 1e3,
+  // 1 minute
+  max: 10,
+  // 10 votes per minute
+  message: { message: "You've reached the voting limit (10 per minute). Please wait 60 seconds before voting again.", code: "RATE_LIMIT_EXCEEDED" }
+  // Use default IP detection (works with trust proxy)
+});
+var uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1e3,
+  // 1 hour
+  max: 5,
+  // 5 uploads per hour
+  message: { message: "Upload limit reached (5 files per hour). You can upload more files in 1 hour.", code: "RATE_LIMIT_EXCEEDED" }
+  // Use default IP detection (works with trust proxy)
+});
+var notificationLimiter = rateLimit({
+  windowMs: 60 * 1e3,
+  // 1 minute
+  max: 20,
+  // 20 operations per minute
+  message: { message: "Too many notification requests (limit: 20 per minute). Please wait a moment before trying again.", code: "RATE_LIMIT_EXCEEDED" }
+  // Use default IP detection (works with trust proxy)
+});
+var messageLimiter = rateLimit({
+  windowMs: 1 * 60 * 1e3,
+  // 1 minute
+  max: 30,
+  // 30 messages per minute per user
+  keyGenerator: (req) => req.user?.id || ipKeyGenerator(req.ip),
+  message: { message: "Slow down! You're sending messages too quickly (limit: 30 per minute). Take a breather and try again in a moment.", code: "RATE_LIMIT_EXCEEDED" },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+var trackSearchSchema = z2.object({
+  query: z2.string().max(300).optional().default(""),
+  filters: z2.record(z2.string(), z2.unknown()).optional().default({}),
+  resultsCount: z2.number().int().min(0).max(1e4).optional().default(0),
+  clickedPostIds: z2.array(z2.string().min(1).max(64)).max(200).optional().default([])
+});
 async function loadUserFromSession(req, _res, next) {
   if (!req.path.startsWith("/api")) {
     return next();
@@ -5969,99 +5901,13 @@ Check Admin Dashboard for details.`,
     res.status(status).json({ message });
   });
 }
-var app, rateLimit, ipKeyGenerator, voteLimiter, uploadLimiter, notificationLimiter, messageLimiter, trackSearchSchema;
-var init_routes = __esm({
-  "lib/routes.ts"() {
-    "use strict";
-    init_realtime();
-    init_logger();
-    init_storage();
-    init_schema_sqlite();
-    init_constants();
-    init_events();
-    init_auth();
-    init_cloudinary();
-    init_db();
-    init_auth2();
-    init_auth_local();
-    init_internal();
-    init_websockets();
-    init_security();
-    init_schema_sqlite();
-    init_maintenance();
-    app = express2();
-    app.use(express2.json({ limit: "50mb" }));
-    app.use(express2.urlencoded({ extended: false, limit: "50mb" }));
-    rateLimit = (options) => (req, res, next) => next();
-    ipKeyGenerator = (ip) => ip;
-    voteLimiter = rateLimit({
-      windowMs: 1 * 60 * 1e3,
-      // 1 minute
-      max: 10,
-      // 10 votes per minute
-      message: { message: "You've reached the voting limit (10 per minute). Please wait 60 seconds before voting again.", code: "RATE_LIMIT_EXCEEDED" }
-      // Use default IP detection (works with trust proxy)
-    });
-    uploadLimiter = rateLimit({
-      windowMs: 60 * 60 * 1e3,
-      // 1 hour
-      max: 5,
-      // 5 uploads per hour
-      message: { message: "Upload limit reached (5 files per hour). You can upload more files in 1 hour.", code: "RATE_LIMIT_EXCEEDED" }
-      // Use default IP detection (works with trust proxy)
-    });
-    notificationLimiter = rateLimit({
-      windowMs: 60 * 1e3,
-      // 1 minute
-      max: 20,
-      // 20 operations per minute
-      message: { message: "Too many notification requests (limit: 20 per minute). Please wait a moment before trying again.", code: "RATE_LIMIT_EXCEEDED" }
-      // Use default IP detection (works with trust proxy)
-    });
-    messageLimiter = rateLimit({
-      windowMs: 1 * 60 * 1e3,
-      // 1 minute
-      max: 30,
-      // 30 messages per minute per user
-      keyGenerator: (req) => req.user?.id || ipKeyGenerator(req.ip),
-      message: { message: "Slow down! You're sending messages too quickly (limit: 30 per minute). Take a breather and try again in a moment.", code: "RATE_LIMIT_EXCEEDED" },
-      standardHeaders: true,
-      legacyHeaders: false
-    });
-    trackSearchSchema = z2.object({
-      query: z2.string().max(300).optional().default(""),
-      filters: z2.record(z2.string(), z2.unknown()).optional().default({}),
-      resultsCount: z2.number().int().min(0).max(1e4).optional().default(0),
-      clickedPostIds: z2.array(z2.string().min(1).max(64)).max(200).optional().default([])
-    });
-  }
-});
 
 // api/_entry.ts
-import serverless from "serverless-http";
-var handler = null;
-var bootstrapFn = null;
-async function initialize() {
-  if (handler) return;
-  const { app: app2, registerRoutes: registerRoutes2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
-  registerRoutes2();
-  handler = serverless(app2, { binary: [] });
-  const { bootstrap: bootstrap2 } = await Promise.resolve().then(() => (init_middleware(), middleware_exports));
-  bootstrapFn = bootstrap2;
-}
+registerRoutes();
+var handler = serverless(app, { binary: [] });
 async function entry_default(req, res) {
-  try {
-    await initialize();
-    if (!await bootstrapFn(req, res)) return;
-    return await handler(req, res);
-  } catch (error) {
-    console.error("Serverless Function Error:", error);
-    res.status(500).json({
-      error: "Internal Server Error",
-      message: error.message,
-      stack: error.stack
-    });
-  }
+  if (!await bootstrap(req, res)) return;
+  return handler(req, res);
 }
 export {
   entry_default as default

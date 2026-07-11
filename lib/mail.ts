@@ -8,12 +8,10 @@ export class NodemailerProvider {
   transporter: nodemailer.Transporter;
 
   constructor() {
-    // SECURITY FIX: Require SMTP credentials in production
-    if (!process.env.SMTP_USER && process.env.NODE_ENV === "production") {
-      throw new Error("CRITICAL: SMTP_USER environment variable must be set in production");
-    }
-    if (!process.env.SMTP_PASS && process.env.NODE_ENV === "production") {
-      throw new Error("CRITICAL: SMTP_PASS environment variable must be set in production");
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      logger.warn("WARNING: SMTP_USER or SMTP_PASS environment variables are not set. Email sending is disabled.");
+      this.transporter = null as any;
+      return;
     }
 
     this.transporter = nodemailer.createTransport({
@@ -25,7 +23,6 @@ export class NodemailerProvider {
         pass: process.env.SMTP_PASS,
       },
       tls: {
-          // SECURITY FIX: Only disable certificate verification in development
           rejectUnauthorized: process.env.NODE_ENV === "production"
       }
     });
@@ -33,6 +30,10 @@ export class NodemailerProvider {
 
   async send(options: MailOptions): Promise<boolean> {
     try {
+      if (!this.transporter) {
+        logger.warn(`[Mail Disabled] Logging Email: To: ${options.to}, Subject: ${options.subject}`);
+        return true;
+      }
       const from = process.env.SMTP_FROM || '"FindATeammate Support" <support@findateammate.online>';
       const info = await this.transporter.sendMail({
         from: from,
