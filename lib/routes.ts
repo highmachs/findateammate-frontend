@@ -181,6 +181,51 @@ export function registerRoutes() {
     res.json({ status: "ok" });
   });
 
+  app.get("/api/diagnose-db", async (req, res) => {
+    const diagnostics: any = {
+      env: {
+        NODE_ENV: process.env.NODE_ENV,
+        VERCEL: process.env.VERCEL,
+        HAS_DB_URL: !!process.env.TURSO_DATABASE_URL,
+        DB_URL_PROTOCOL: process.env.TURSO_DATABASE_URL ? (process.env.TURSO_DATABASE_URL.startsWith("libsql://") ? "libsql:" : (process.env.TURSO_DATABASE_URL.startsWith("https://") ? "https:" : "unknown")) : null,
+        HAS_AUTH_TOKEN: !!process.env.TURSO_AUTH_TOKEN,
+        AUTH_TOKEN_LEN: process.env.TURSO_AUTH_TOKEN?.length,
+      }
+    };
+
+    try {
+      const dbUrl = process.env.TURSO_DATABASE_URL;
+      if (!dbUrl) {
+        throw new Error("TURSO_DATABASE_URL is missing");
+      }
+
+      const httpsUrl = dbUrl.replace(/^libsql:\/\//, "https://");
+      diagnostics.httpsUrl = httpsUrl;
+
+      const { createClient } = await import("@libsql/client");
+      const client = createClient({
+        url: httpsUrl,
+        authToken: process.env.TURSO_AUTH_TOKEN,
+      });
+
+      // Run a query with a promise timeout
+      const queryPromise = client.execute("SELECT 1 as val;");
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Database query timed out after 3 seconds")), 3000)
+      );
+
+      const result = await Promise.race([queryPromise, timeoutPromise]) as any;
+      diagnostics.querySuccess = true;
+      diagnostics.queryResult = result.rows;
+    } catch (error: any) {
+      diagnostics.querySuccess = false;
+      diagnostics.error = error.message;
+      diagnostics.stack = error.stack;
+    }
+
+    res.status(200).json(diagnostics);
+  });
+
   // Vercel Serverless Function replacements
   app.use("/api/auth", authApp); // Mount Google OAuth (authApp)
   app.use("/api/auth", authLocalRouter); // Mount Local Auth
