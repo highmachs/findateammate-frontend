@@ -535,7 +535,7 @@ var init_schema_sqlite = __esm({
 // lib/db.ts
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-var tursoClient, db;
+var dbUrl, tursoClient, db;
 var init_db = __esm({
   "lib/db.ts"() {
     "use strict";
@@ -543,8 +543,9 @@ var init_db = __esm({
     if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
       throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set.");
     }
+    dbUrl = process.env.TURSO_DATABASE_URL.replace(/^libsql:\/\//, "https://");
     tursoClient = createClient({
-      url: process.env.TURSO_DATABASE_URL,
+      url: dbUrl,
       authToken: process.env.TURSO_AUTH_TOKEN
     });
     db = drizzle(tursoClient, { schema: schema_sqlite_exports });
