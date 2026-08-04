@@ -91,8 +91,8 @@ export async function loadUser(req: any): Promise<void> {
     if (user) {
       const { password, ...safeUser } = user;
       req.user = safeUser;
-      // fire-and-forget last active
-      storage.updateLastActive(user.id).catch(() => {});
+      // Await last active update to prevent serverless container freezing mid-query
+      await storage.updateLastActive(user.id).catch(() => {});
     }
   } catch {
     // silently continue

@@ -241,8 +241,8 @@ export class DatabaseStorage implements IStorage {
     if (now - lastUpdate > 5 * 60 * 1000) {
       this.lastActiveUpdates.set(id, now);
       
-      // Fire and forget
-      db.update(users)
+      // Await to prevent Vercel from freezing container mid-query and breaking the connection pool
+      await db.update(users)
         .set({ lastActive: new Date() })
         .where(eq(users.id, id))
         .execute()
