@@ -231,14 +231,23 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  private lastActiveUpdates = new Map<string, number>();
+
   async updateLastActive(id: string): Promise<void> {
-    // Update lastActive timestamp without cache invalidation (performance optimization)
-    // Fire and forget - we don't await this in the hot path
-    db.update(users)
-      .set({ lastActive: new Date() })
-      .where(eq(users.id, id))
-      .execute()
-      .catch(err => logger.error("Failed to update lastActive", err));
+    const now = Date.now();
+    const lastUpdate = this.lastActiveUpdates.get(id) || 0;
+    
+    // Only update DB once every 5 minutes per user to prevent DB locking and slow requests
+    if (now - lastUpdate > 5 * 60 * 1000) {
+      this.lastActiveUpdates.set(id, now);
+      
+      // Fire and forget
+      db.update(users)
+        .set({ lastActive: new Date() })
+        .where(eq(users.id, id))
+        .execute()
+        .catch(err => logger.error("Failed to update lastActive", err));
+    }
   }
 
 

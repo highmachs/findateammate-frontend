@@ -7,18 +7,21 @@ import { logger } from "../logger";
 
 export const authLocalRouter = Router();
 
-function verifyPassword(password: string, storedHash: string): boolean {
+import { promisify } from "util";
+const scryptAsync = promisify(crypto.scrypt);
+
+async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
   if (!storedHash) return false;
   const [salt, key] = storedHash.split(":");
   if (!salt || !key) return false;
-  const derivedKey = crypto.scryptSync(password, salt, 64).toString("hex");
-  return key === derivedKey;
+  const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
+  return key === derivedKey.toString("hex");
 }
 
-function hashPassword(password: string): string {
+async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16).toString("hex");
-  const derivedKey = crypto.scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${derivedKey}`;
+  const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${derivedKey.toString("hex")}`;
 }
 
 authLocalRouter.post("/login", async (req: any, res: any) => {
@@ -36,7 +39,7 @@ authLocalRouter.post("/login", async (req: any, res: any) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const isValid = verifyPassword(password, user.password);
+    const isValid = await verifyPassword(password, user.password);
     if (!isValid) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
@@ -73,7 +76,7 @@ authLocalRouter.post("/register", async (req: any, res: any) => {
       return res.status(409).json({ message: "Email already in use" });
     }
 
-    const hashedPassword = hashPassword(password);
+    const hashedPassword = await hashPassword(password);
     
     // Create new user
     const username = `user_${crypto.randomBytes(4).toString('hex')}`;

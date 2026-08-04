@@ -138,19 +138,38 @@ export async function bootstrap(req: any, res: any): Promise<boolean> {
       res.setHeader("Set-Cookie", str);
     };
   }
-  // CORS
-  if (setCorsHeaders(req, res)) return false; // preflight handled
-  // Cookie parser
-  await runMiddleware(req, res, cookieParser());
-  // Session
-  await runMiddleware(req, res, sessionMiddleware);
-  // Load user from session
-  await loadUser(req);
   
-  // CSRF Protection
-  if (req.url && req.url.startsWith("/api") && !req.url.startsWith("/api/internal") && !req.headers["x-partykit-secret"]) {
-    await runMiddleware(req, res, _doubleCsrfProtection);
+  try {
+    // CORS
+    if (setCorsHeaders(req, res)) return false; // preflight handled
+    
+    // Cookie parser
+    await runMiddleware(req, res, cookieParser());
+    
+    // Session
+    await runMiddleware(req, res, sessionMiddleware);
+    
+    // Load user from session
+    await loadUser(req);
+    
+    // CSRF Protection
+    const isInternal = req.url?.startsWith("/api/internal");
+    const isAnalytics = req.url?.startsWith("/api/analytics"); // sendBeacon cannot send CSRF headers
+    const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
+    
+    if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
+      await runMiddleware(req, res, _doubleCsrfProtection);
+    }
+    
+    return true; // ready to proceed
+  } catch (error: any) {
+    // Gracefully handle middleware errors (e.g. CSRF invalid) instead of crashing Vercel function
+    if (error.code === 'EBADCSRFTOKEN') {
+      res.status(403).json({ message: "Invalid CSRF Token" });
+    } else {
+      console.error("Middleware error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+    return false;
   }
-  
-  return true; // ready to proceed
 }
