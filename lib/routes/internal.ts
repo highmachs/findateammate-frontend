@@ -8,7 +8,10 @@ export const internalRouter = Router();
 
 internalRouter.get("/run-audit-export", async (req: any, res: any) => {
   const secret = req.headers["x-cron-secret"];
-  if (secret !== process.env.CRON_SECRET) {
+  const authHeader = req.headers.authorization;
+  const isAuthorized = secret === process.env.CRON_SECRET || authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  
+  if (!isAuthorized) {
     logger.warn(`Unauthorized cron attempt: invalid CRON_SECRET`);
     return res.status(403).json({ error: "Forbidden" });
   }
@@ -27,8 +30,11 @@ internalRouter.use("/daily-cleanup", async (req: any, res: any) => {
     return res.status(405).json({ message: "Method Not Allowed" });
   }
 
-  const authHeader = req.headers["x-cron-secret"];
-  if (process.env.CRON_SECRET && authHeader !== process.env.CRON_SECRET) {
+  const secret = req.headers["x-cron-secret"];
+  const bearerHeader = req.headers.authorization;
+  const isAuthorized = secret === process.env.CRON_SECRET || bearerHeader === `Bearer ${process.env.CRON_SECRET}`;
+  
+  if (process.env.CRON_SECRET && !isAuthorized) {
     return res.status(401).json({ message: "Unauthorized" });
   }
 

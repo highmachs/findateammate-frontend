@@ -19,7 +19,7 @@ import {
   getEventMatchScore,
 } from "./routes/events";
 import { z } from "zod";
-const rateLimit = (options: any) => (req: any, res: any, next: any) => next();
+import { rateLimit } from "./ratelimit";
 const ipKeyGenerator = (ip: any) => ip;
 import { requireAuth, requireVerifiedAuth, optionalAuth, requireAdmin, requireOrganiser, isSuperAdminEmail } from "./middleware/auth";
 import multer from "multer";
@@ -166,8 +166,7 @@ export function registerRoutes() {
 
 
 
-  // Apply user loading middleware to all routes
-  app.use(loadUserFromSession);
+  // User loading middleware is now handled via bootstrap() in api/_entry.ts
   
   // Maintenance Mode Check
   app.use(maintenanceMiddleware);
@@ -181,7 +180,7 @@ export function registerRoutes() {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/diagnose-db", async (req, res) => {
+  app.get("/api/diagnose-db", requireAuth, requireAdmin, async (req, res) => {
     const diagnostics: any = {
       env: {
         NODE_ENV: process.env.NODE_ENV,
@@ -291,16 +290,15 @@ export function registerRoutes() {
 
   // Unified Session Endpoint
   app.get("/api/me", async (req, res) => {
-    // 1. Passport Session (OAuth)
+    // 1. Passport Session (OAuth) or Middleware Session
     if (req.user) {
-      const safeUser = selectUserSchema.parse(req.user);
-      return res.json(safeUser);
+      return res.json(req.user);
     }
-    // 2. Manual Session
+    // 2. Manual Session Fallback
     if (req.session.userId) {
       const user = await storage.getUser(req.session.userId);
       if (user) {
-        const safeUser = selectUserSchema.parse(user);
+        const { password, ...safeUser } = user;
         return res.json(safeUser);
       }
     }
@@ -1152,9 +1150,7 @@ export function registerRoutes() {
     keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip),
     message: { message: "Too many registration attempts. Please try again later.", code: "RATE_LIMIT_EXCEEDED" },
   });
-  void registrationLimiter;
-
-  app.post("/api/events/:eventId/register", requireAuth, async (req, res, next) => {
+  app.post("/api/events/:eventId/register", requireAuth, registrationLimiter, async (req, res, next) => {
     try {
       if (req.user!.isBanned && !req.user!.isAdmin) {
         return res.status(403).json({ message: "You have been banned and cannot register for events", code: "USER_BANNED" });
@@ -2187,10 +2183,10 @@ export function registerRoutes() {
         pendingReports: Number((pendingReportCountResult[0] as any).count),
         postsByDate,
         skills: await db.all(sql`
-          SELECT skill_item as name, COUNT(*) as count
-          FROM ${users}, jsonb_array_elements_text(skills) as skill_item
-          WHERE skills IS NOT NULL AND jsonb_array_length(skills) > 0
-          GROUP BY skill_item
+          SELECT json_each.value as name, COUNT(*) as count
+          FROM ${users}, json_each(skills)
+          WHERE skills IS NOT NULL AND json_array_length(skills) > 0
+          GROUP BY json_each.value
           ORDER BY count DESC
           LIMIT 10
         `).then(res => {
@@ -3087,6 +3083,23 @@ export function registerRoutes() {
     } catch (error) {
        logger.error("Health check failed", error);
        res.status(503).json({ status: "error", message: "Database connection failed" });
+    }
+  });
+
+  // Docs route
+  app.get("/api/docs", async (_req, res, next) => {
+    try {
+      const fs = (await import("fs")).default;
+      const path = (await import("path")).default;
+      const docsPath = path.join(process.cwd(), "docs", "api.md");
+      if (fs.existsSync(docsPath)) {
+        res.setHeader('Content-Type', 'text/markdown');
+        res.send(fs.readFileSync(docsPath, 'utf8'));
+      } else {
+        res.status(404).json({ message: "Docs not found" });
+      }
+    } catch (error) {
+      next(error);
     }
   });
 

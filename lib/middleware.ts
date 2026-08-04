@@ -41,8 +41,8 @@ const {
   getSessionIdentifier: (req: any) => req.sessionID || "anonymous",
 });
 
-export const generateCsrfToken = () => "mock-csrf-token";
-export const doubleCsrfProtection = (req: any, res: any, next: any) => next();
+export const generateCsrfToken = _generateCsrfToken;
+export const doubleCsrfProtection = _doubleCsrfProtection;
 
 // ----- CORS Headers -----
 const allowedOrigins = [
@@ -146,5 +146,11 @@ export async function bootstrap(req: any, res: any): Promise<boolean> {
   await runMiddleware(req, res, sessionMiddleware);
   // Load user from session
   await loadUser(req);
+  
+  // CSRF Protection
+  if (req.url && req.url.startsWith("/api") && !req.url.startsWith("/api/internal") && !req.headers["x-partykit-secret"]) {
+    await runMiddleware(req, res, _doubleCsrfProtection);
+  }
+  
   return true; // ready to proceed
 }

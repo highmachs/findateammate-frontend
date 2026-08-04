@@ -1,7 +1,7 @@
 import { Server, type Connection, type ConnectionContext } from "partyserver";
 import { verifyWsToken } from "./lib/auth";
 
-export class NotificationRoom extends Server {
+export class Notifications extends Server {
   async onConnect(conn: Connection, ctx: ConnectionContext) {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");
@@ -17,7 +17,7 @@ export class NotificationRoom extends Server {
       return;
     }
 
-    const payload = await verifyWsToken(token);
+    const payload = await verifyWsToken(token, this.env as Record<string, unknown>);
     if (!payload) {
       conn.close(4001, "Invalid token");
       return;

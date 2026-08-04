@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "check": "tsc",
     "dev:api": "tsx scripts/dev-server.ts",
-    "dev:ws": "partykit dev"
+    "dev:ws": "wrangler dev --port 1999"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

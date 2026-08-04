@@ -362,20 +362,24 @@ export default function Onboarding() {
                 render={({ field }) => {
                   const currentSkills = field.value || [];
                   
+                  const handleAddSkill = () => {
+                    const newSkill = skillInput.trim();
+                    if (newSkill && !currentSkills.includes(newSkill) && SKILLS.includes(newSkill as any)) {
+                      field.onChange([...currentSkills, newSkill]);
+                      setSkillInput("");
+                    } else if (newSkill && !SKILLS.includes(newSkill as any)) {
+                      toast({
+                        title: "Invalid Skill",
+                        description: "Please select a skill from the predefined list.",
+                        variant: "destructive",
+                      });
+                    }
+                  };
+
                   const addSkill = (e: React.KeyboardEvent) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      const newSkill = skillInput.trim();
-                      if (newSkill && !currentSkills.includes(newSkill) && SKILLS.includes(newSkill as any)) {
-                        field.onChange([...currentSkills, newSkill]);
-                        setSkillInput("");
-                      } else if (newSkill && !SKILLS.includes(newSkill as any)) {
-                        toast({
-                          title: "Invalid Skill",
-                          description: "Please select a skill from the predefined list.",
-                          variant: "destructive",
-                        });
-                      }
+                      handleAddSkill();
                     }
                   };
 
@@ -387,14 +391,27 @@ export default function Onboarding() {
                     <FormItem>
                       <FormLabel className="text-foreground font-semibold">Skills *</FormLabel>
                       <FormControl>
-                        <Input
-                          value={skillInput}
-                          onChange={(e) => setSkillInput(e.target.value)}
-                          onKeyDown={addSkill}
-                          placeholder="Type a skill and press Enter (e.g. React, Python)"
-                          className="bg-muted/50 h-12 border-input text-foreground"
-                          list="skills-datalist"
-                        />
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            value={skillInput}
+                            onChange={(e) => setSkillInput(e.target.value)}
+                            onKeyDown={addSkill}
+                            placeholder="Type a skill and press Enter (e.g. React, Python)"
+                            className="bg-muted/50 h-12 border-input text-foreground flex-1"
+                            list="skills-datalist"
+                          />
+                          <Button 
+                            type="button" 
+                            variant="secondary"
+                            className="h-12 px-6 bg-primary/10 text-primary hover:bg-primary/20"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleAddSkill();
+                            }}
+                          >
+                            Add
+                          </Button>
+                        </div>
                       </FormControl>
                       <datalist id="skills-datalist">
                         {SKILLS.map((skill) => (

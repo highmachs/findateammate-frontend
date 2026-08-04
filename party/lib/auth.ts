@@ -6,9 +6,9 @@ export interface WsTokenPayload extends jose.JWTPayload {
   isBanned: boolean;
 }
 
-export async function verifyWsToken(token: string): Promise<WsTokenPayload | null> {
+export async function verifyWsToken(token: string, env: Record<string, unknown>): Promise<WsTokenPayload | null> {
   try {
-    const secretStr = process.env.WS_JWT_SECRET;
+    const secretStr = env.WS_JWT_SECRET as string | undefined;
     if (!secretStr) {
       console.error("[PartyKit Auth] WS_JWT_SECRET is not set");
       return null;

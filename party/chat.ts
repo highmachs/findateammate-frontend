@@ -2,7 +2,7 @@ import { Server, type Connection, type ConnectionContext } from "partyserver";
 import { verifyWsToken } from "./lib/auth";
 
 // Each instance = one chat room (room name = chatId)
-export class ChatRoom extends Server {
+export class Chat extends Server {
   private connectionUsers = new Map<string, string>();
 
   async onConnect(conn: Connection, ctx: ConnectionContext) {
@@ -15,7 +15,7 @@ export class ChatRoom extends Server {
       return;
     }
 
-    const payload = await verifyWsToken(token);
+    const payload = await verifyWsToken(token, this.env as Record<string, unknown>);
     if (!payload) {
       conn.send(JSON.stringify({ type: "error", message: "Invalid or expired token" }));
       conn.close(4001, "Unauthorized");
@@ -32,11 +32,11 @@ export class ChatRoom extends Server {
     const chatId = this.name; // room name = chatId
 
     // Validate that this user is actually a participant in this chat
-    const apiUrl = (this as any).env.VERCEL_API_URL as string || "";
+    const apiUrl = (this.env.VERCEL_API_URL as string) || "";
     try {
       const checkRes = await fetch(`${apiUrl}/api/chats/${chatId}/check-participant`, {
         headers: {
-          "x-partykit-secret": (this as any).env.PARTYKIT_SECRET as string,
+          "x-partykit-secret": this.env.PARTYKIT_SECRET as string,
           "x-user-id": userId,
         },
       });
@@ -47,7 +47,30 @@ export class ChatRoom extends Server {
         return;
       }
     } catch (err) {
-      console.warn("[ChatRoom] Could not verify participant — failing open:", err);
+      console.warn("[ChatRoom] Could not verify participant on first try, retrying in case of cold start:", err);
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000); // 2 second timeout for retry
+        const retryRes = await fetch(`${apiUrl}/api/chats/${chatId}/check-participant`, {
+          headers: {
+            "x-partykit-secret": this.env.PARTYKIT_SECRET as string,
+            "x-user-id": userId,
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+        
+        if (!retryRes.ok) {
+          conn.send(JSON.stringify({ type: "error", message: "Unauthorized: Not a chat participant" }));
+          conn.close(4003, "Forbidden");
+          return;
+        }
+      } catch (retryErr) {
+        console.error("[ChatRoom] Participant verification failed after retry — failing closed:", retryErr);
+        conn.send(JSON.stringify({ type: "error", message: "Verification failed (network issue)" }));
+        conn.close(4003, "Forbidden");
+        return;
+      }
     }
 
     this.connectionUsers.set(conn.id, userId);
@@ -77,13 +100,13 @@ export class ChatRoom extends Server {
         return;
       }
 
-      const apiUrl = (this as any).env.VERCEL_API_URL as string || "";
+      const apiUrl = (this.env.VERCEL_API_URL as string) || "";
       try {
         const saveRes = await fetch(`${apiUrl}/api/chats/${this.name}/messages`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-partykit-secret": (this as any).env.PARTYKIT_SECRET as string,
+            "x-partykit-secret": this.env.PARTYKIT_SECRET as string,
             "x-user-id": userId,
           },
           body: JSON.stringify({ content: content.trim() }),
