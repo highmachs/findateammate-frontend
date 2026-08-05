@@ -1,8 +1,9 @@
-import serverless from "serverless-http";
-import { app, registerRoutes } from "../lib/routes";
-
-// Initialize the Express routes once per cold start
-registerRoutes();
-
-// Delegate to the Express app via serverless-http adapter
-export default serverless(app, { binary: [] });
+export default async function (req: any, res: any) {
+  console.log("DIRECT HANDLER HIT");
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({
+    success: true,
+    url: req.url
+  }));
+}
