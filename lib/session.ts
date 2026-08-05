@@ -71,7 +71,7 @@ export class TursoSessionStore extends Store {
       await withTimeout(
         db.insert(sessionTable).values({ sid, sess, expire })
           .onConflictDoUpdate({ target: sessionTable.sid, set: { sess, expire } }),
-        2000,
+        5000,
         "TursoSessionStore.set"
       );
       console.log('after await withTimeout set')
@@ -88,7 +88,7 @@ export class TursoSessionStore extends Store {
       console.log('before await withTimeout destroy')
       await withTimeout(
         db.delete(sessionTable).where(eq(sessionTable.sid, sid)),
-        2000,
+        5000,
         "TursoSessionStore.destroy"
       );
       console.log('after await withTimeout destroy')
