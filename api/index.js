@@ -3760,7 +3760,14 @@ async function maintenanceMiddleware(req, res, next) {
     if (process.env.MAINTENANCE_SECRET && req.headers["x-maintenance-bypass"] === process.env.MAINTENANCE_SECRET) {
       return next();
     }
-    const setting = await storage.getSystemSetting("maintenance_mode");
+    const withTimeout3 = (promise, ms, label = "Operation") => {
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      });
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    };
+    const setting = await withTimeout3(storage.getSystemSetting("maintenance_mode"), 1500, "maintenance_mode_fetch");
     if (!setting || !setting.value) {
       return next();
     }
@@ -5453,10 +5460,14 @@ function registerRoutes() {
           ip: req.ip
         }
       };
-      await storage.logEvent(event);
+      waitUntil2(
+        storage.logEvent(event).catch((error) => {
+          console.error("Analytics logging failed:", error);
+        })
+      );
       res.sendStatus(200);
     } catch (error) {
-      console.error("Analytics logging failed:", error);
+      console.error("Analytics parsing failed:", error);
       res.sendStatus(200);
     }
   });

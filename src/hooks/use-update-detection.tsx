@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 
 /**
  * Hook to detect when a new app version is deployed and notify user
@@ -48,13 +49,11 @@ export function useUpdateDetection() {
           description: "A fresh update is ready. Click to reload and get the latest features!",
           variant: "default",
           duration: 0, // Don't auto-dismiss
-          action: {
-            label: "Refresh",
-            onClick: () => {
-              // Hard refresh - clears cache and reloads
-              window.location.href = window.location.href;
-            },
-          } as any, // Allow custom onClick handler
+          action: (
+            <ToastAction altText="Refresh" onClick={() => window.location.href = window.location.href}>
+              Refresh
+            </ToastAction>
+          ),
         });
 
         // Update stored version

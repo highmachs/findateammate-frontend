@@ -46,7 +46,15 @@ export async function maintenanceMiddleware(req: Request, res: Response, next: N
     }
 
     // 5. Fetch Setting (Cached)
-    const setting = await storage.getSystemSetting('maintenance_mode');
+    const withTimeout = <T>(promise: Promise<T>, ms: number, label: string = 'Operation'): Promise<T> => {
+      let timer: NodeJS.Timeout;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      });
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    };
+
+    const setting = await withTimeout(storage.getSystemSetting('maintenance_mode'), 1500, "maintenance_mode_fetch");
     if (!setting || !setting.value) {
       return next();
     }

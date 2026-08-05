@@ -2289,11 +2289,15 @@ export function registerRoutes() {
         }
       };
 
-      await storage.logEvent(event);
+      waitUntil(
+        storage.logEvent(event).catch((error) => {
+          console.error("Analytics logging failed:", error);
+        })
+      );
       res.sendStatus(200);
     } catch (error) {
-      // Analytics should fail silently to not impact user experience
-      console.error("Analytics logging failed:", error);
+      // Catch validation errors silently
+      console.error("Analytics parsing failed:", error);
       res.sendStatus(200);
     }
   });
