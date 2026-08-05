@@ -52,7 +52,7 @@ const allowedOrigins = [
   ...(isProduction ? [] : ["http://localhost:5000", "http://localhost:5173", "http://localhost:3000"]),
 ].filter(Boolean) as string[];
 
-export function setCorsHeaders(req: VercelRequest, res: VercelResponse): boolean {
+export function corsMiddleware(req: any, res: any, next: any) {
   const origin = req.headers.origin as string | undefined;
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -64,27 +64,17 @@ export function setCorsHeaders(req: VercelRequest, res: VercelResponse): boolean
   // Handle preflight
   if (req.method === "OPTIONS") {
     res.status(204).end();
-    return true; // signal: response already sent
+    return;
   }
-  return false;
-}
-
-// ----- Run Express middleware in Vercel function -----
-export function runMiddleware(req: any, res: any, fn: Function): Promise<void> {
-  return new Promise((resolve, reject) => {
-    fn(req, res, (result: any) => {
-      if (result instanceof Error) return reject(result);
-      resolve();
-    });
-  });
+  next();
 }
 
 // ----- Load user from session (runs on every request) -----
-export async function loadUser(req: any): Promise<void> {
-  if (req.user) return;
+export async function loadUserMiddleware(req: any, res: any, next: any) {
+  if (req.user) return next();
 
   const userId = req.session?.userId || req.session?.passport?.user;
-  if (!userId) return;
+  if (!userId) return next();
 
   try {
     const userPromise = storage.getUser(userId);
@@ -99,6 +89,7 @@ export async function loadUser(req: any): Promise<void> {
   } catch {
     // silently continue
   }
+  next();
 }
 
 // ----- Auth guards -----
@@ -133,50 +124,23 @@ export function requireOrganiser(req: any, res: VercelResponse): boolean {
 }
 
 // ----- Convenience: bootstrap all middleware for an API handler -----
-export async function bootstrap(req: any, res: any): Promise<boolean> {
-  if (!res.cookie) {
-    res.cookie = (name: string, val: string, opts?: any) => {
-      const str = `${name}=${val}; Path=/` + (opts?.httpOnly ? "; HttpOnly" : "");
-      res.setHeader("Set-Cookie", str);
-    };
-  }
+export function csrfMiddleware(req: any, res: any, next: any) {
+  const isInternal = req.url?.startsWith("/api/internal");
+  const isAnalytics = req.url?.startsWith("/api/analytics"); // sendBeacon cannot send CSRF headers
+  const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
 
-  try {
-    // CORS
-    if (setCorsHeaders(req, res)) return false; // preflight handled
-
-    // Cookie parser
-    console.log("Cookieparser----")
-    await runMiddleware(req, res, cookieParser());
-
-    // Session
-    console.log("sessionMiddleware-----")
-    await runMiddleware(req, res, sessionMiddleware);
-
-    // Load user from session
-    await loadUser(req);
-
-    // CSRF Protection
-    const isInternal = req.url?.startsWith("/api/internal");
-    const isAnalytics = req.url?.startsWith("/api/analytics"); // sendBeacon cannot send CSRF headers
-    const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
-
-    console.log("before doubleCsrfProtection")
-    if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
-      await runMiddleware(req, res, _doubleCsrfProtection);
-      console.log("inside doubleCsrfProtection")
-    }
-    console.log("after doubleCsrfProtection")
-
-    return true; // ready to proceed
-  } catch (error: any) {
-    // Gracefully handle middleware errors (e.g. CSRF invalid) instead of crashing Vercel function
-    if (error.code === 'EBADCSRFTOKEN') {
-      res.status(403).json({ message: "Invalid CSRF Token" });
-    } else {
-      console.error("Middleware error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-    return false;
+  if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
+    _doubleCsrfProtection(req, res, (err: any) => {
+      if (err) {
+        if (err.code === 'EBADCSRFTOKEN') {
+          return res.status(403).json({ message: "Invalid CSRF Token" });
+        }
+        console.error("CSRF Middleware error:", err);
+        return res.status(500).json({ message: "Internal server error" });
+      }
+      next();
+    });
+  } else {
+    next();
   }
 }

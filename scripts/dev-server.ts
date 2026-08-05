@@ -14,19 +14,8 @@ async function start() {
   const express = (await import("express")).default;
   const cookieParser = (await import("cookie-parser")).default;
   const { app, registerRoutes } = await import("../lib/routes");
-  const { bootstrap } = await import("../lib/middleware");
 
-  // Apply the same bootstrap middleware sequence as Vercel (CORS, cookies, session, user, CSRF)
-  app.use(async (req: any, res: any, next: any) => {
-    try {
-      const proceed = await bootstrap(req, res);
-      if (proceed) next();
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // Register API routes
+  // Register API routes (which now include all middleware)
   registerRoutes();
 
   const PORT = process.env.PORT || 3000;
