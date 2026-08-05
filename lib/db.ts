@@ -18,7 +18,19 @@ export const tursoClient = createClient({
   fetch: (url, init) => {
     const headers = new Headers(init?.headers);
     headers.set('Connection', 'close');
-    return fetch(url, { ...init, headers });
+    
+    // Create an abort controller to hard-kill the fetch if it hangs > 3s
+    // This prevents Vercel from waiting for an empty event loop and throwing a 504
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    
+    // If the caller provided a signal, link them (though libsql client doesn't currently)
+    if (init?.signal) {
+      init.signal.addEventListener('abort', () => controller.abort());
+    }
+    
+    return fetch(url, { ...init, headers, signal: controller.signal })
+      .finally(() => clearTimeout(timeout));
   }
 });
 
