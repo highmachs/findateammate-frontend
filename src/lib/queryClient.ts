@@ -70,7 +70,7 @@ async function getCsrfToken(forceRefresh = false) {
   if (csrfToken && !forceRefresh) return csrfToken;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+    const timeoutId = setTimeout(() => controller.abort("Request timed out after 30s"), 30000); // 30s timeout
     
     try {
       const res = await fetch(buildApiUrl("/api/csrf-token"), {
@@ -119,7 +119,7 @@ export async function apiRequest(
   const fullUrl = url.startsWith("http") ? url : buildApiUrl(url);
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  const timeoutId = setTimeout(() => controller.abort("Request timed out after 30s"), 30000); // 30s timeout
   
   try {
     let res = await fetch(fullUrl, {
@@ -162,7 +162,7 @@ export const getQueryFn: <T>(options: {
       const fullUrl = url.startsWith("http") ? url : buildApiUrl(url);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      const timeoutId = setTimeout(() => controller.abort("Request timed out after 30s"), 30000); // 30s timeout
       
       try {
         const res = await fetch(fullUrl, {

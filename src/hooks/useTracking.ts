@@ -37,7 +37,7 @@ function setCached<T>(cache: Map<string, CacheEntry<T>>, key: string, value: T) 
 
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = window.setTimeout(() => controller.abort("Analytics request timed out"), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {

@@ -4,6 +4,21 @@ import { session as sessionTable } from "../shared/schema.sqlite";
 import { eq, lt } from "drizzle-orm";
 
 /**
+ * Helper to prevent Turso from hanging the global middleware chain
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
+/**
  * TursoSessionStore for serverless environments.
  * Stores sessions in Turso (external DB) — no in-memory state.
  * Unlike the original, this does NOT use setInterval for pruning;
@@ -19,7 +34,11 @@ export class TursoSessionStore extends Store {
         return cb(null, cached.sess);
       }
 
-      const [row] = await db.select().from(sessionTable).where(eq(sessionTable.sid, sid));
+      const [row] = await withTimeout(
+        db.select().from(sessionTable).where(eq(sessionTable.sid, sid)),
+        2000,
+        "TursoSessionStore.get"
+      );
       if (!row || row.expire.getTime() < Date.now()) return cb(null, undefined);
       
       // Update cache with 15s TTL
@@ -27,7 +46,9 @@ export class TursoSessionStore extends Store {
       
       cb(null, row.sess as any);
     } catch (err) {
-      cb(err);
+      console.error("TursoSessionStore.get error:", err);
+      // Fail open: treat as session miss instead of throwing and crashing the request
+      cb(null, undefined);
     }
   }
 
@@ -35,10 +56,15 @@ export class TursoSessionStore extends Store {
     try {
       this.cache.delete(sid); // Invalidate cache
       const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1000);
-      await db.insert(sessionTable).values({ sid, sess, expire })
-        .onConflictDoUpdate({ target: sessionTable.sid, set: { sess, expire } });
+      await withTimeout(
+        db.insert(sessionTable).values({ sid, sess, expire })
+          .onConflictDoUpdate({ target: sessionTable.sid, set: { sess, expire } }),
+        2000,
+        "TursoSessionStore.set"
+      );
       cb?.();
     } catch (err) {
+      console.error("TursoSessionStore.set error:", err);
       cb?.(err);
     }
   }
@@ -46,9 +72,14 @@ export class TursoSessionStore extends Store {
   async destroy(sid: string, cb?: (err?: any) => void) {
     try {
       this.cache.delete(sid); // Invalidate cache
-      await db.delete(sessionTable).where(eq(sessionTable.sid, sid));
+      await withTimeout(
+        db.delete(sessionTable).where(eq(sessionTable.sid, sid)),
+        2000,
+        "TursoSessionStore.destroy"
+      );
       cb?.();
     } catch (err) {
+      console.error("TursoSessionStore.destroy error:", err);
       cb?.(err);
     }
   }
@@ -67,9 +98,14 @@ export class TursoSessionStore extends Store {
         return cb?.();
       }
 
-      await db.update(sessionTable).set({ expire }).where(eq(sessionTable.sid, sid));
+      await withTimeout(
+        db.update(sessionTable).set({ expire }).where(eq(sessionTable.sid, sid)),
+        2000,
+        "TursoSessionStore.touch"
+      );
       cb?.();
     } catch (err) {
+      console.error("TursoSessionStore.touch error:", err);
       cb?.(err);
     }
   }
