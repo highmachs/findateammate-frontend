@@ -1,4 +1,5 @@
 import express from "express";
+import { waitUntil } from "@vercel/functions";
 export const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
@@ -698,8 +699,10 @@ export function registerRoutes() {
       if (currentUser?.avatar?.startsWith("https://res.cloudinary.com/")) {
         logger.log(`Deleting old avatar: ${currentUser.avatar}`);
         // Fire-and-forget — don't block the upload on cleanup
-        deleteFromCloudinary(currentUser.avatar).catch((err: any) =>
-          logger.error("Failed to delete old Cloudinary avatar", err)
+        waitUntil(
+          deleteFromCloudinary(currentUser.avatar).catch((err: any) =>
+            logger.error("Failed to delete old Cloudinary avatar", err)
+          )
         );
       }
 
@@ -1684,8 +1687,10 @@ export function registerRoutes() {
 
       // Boost preferences based on successful connection (feedback loop)
       const { boostPreferencesFromConnection } = await import("./recommendations");
-      boostPreferencesFromConnection(request.fromUserId, request.postId, true).catch((err) =>
-        logger.error("Failed to boost preferences from connection", { error: err })
+      waitUntil(
+        boostPreferencesFromConnection(request.fromUserId, request.postId, true).catch((err) =>
+          logger.error("Failed to boost preferences from connection", { error: err })
+        )
       );
 
       await storage.createNotification({
@@ -1724,8 +1729,10 @@ export function registerRoutes() {
       
       // Apply negative feedback to preferences (feedback loop)
       const { boostPreferencesFromConnection } = await import("./recommendations");
-      boostPreferencesFromConnection(request.fromUserId, request.postId, false).catch((err) =>
-        logger.error("Failed to apply feedback from rejection", { error: err })
+      waitUntil(
+        boostPreferencesFromConnection(request.fromUserId, request.postId, false).catch((err) =>
+          logger.error("Failed to apply feedback from rejection", { error: err })
+        )
       );
       
       res.json({ success: true });

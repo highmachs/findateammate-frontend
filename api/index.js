@@ -1337,6 +1337,7 @@ import serverless from "serverless-http";
 
 // lib/routes.ts
 import express2 from "express";
+import { waitUntil as waitUntil2 } from "@vercel/functions";
 
 // lib/realtime.ts
 var PARTYKIT_HOST = process.env.PARTYKIT_HOST;
@@ -1381,6 +1382,7 @@ init_logger();
 init_schema_sqlite();
 init_db();
 init_logger();
+import { waitUntil } from "@vercel/functions";
 import { eq as eq2, desc as desc2, asc, and as and2, or as or2, inArray as inArray2, gt as gt2, lt, sql as sql3, isNotNull } from "drizzle-orm";
 var MemoryCache = class {
   constructor(ttlSeconds = 60) {
@@ -1466,8 +1468,16 @@ var DatabaseStorage = class {
     await this.userCache.delete(id);
     return user;
   }
+  lastActiveUpdates = /* @__PURE__ */ new Map();
   async updateLastActive(id) {
-    db.update(users).set({ lastActive: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).execute().catch((err) => logger.error("Failed to update lastActive", err));
+    const now = Date.now();
+    const lastUpdate = this.lastActiveUpdates.get(id) || 0;
+    if (now - lastUpdate > 5 * 60 * 1e3) {
+      this.lastActiveUpdates.set(id, now);
+      waitUntil(
+        db.update(users).set({ lastActive: /* @__PURE__ */ new Date() }).where(eq2(users.id, id)).execute().catch((err) => logger.error("Failed to update lastActive", err))
+      );
+    }
   }
   // Posts
   async getPosts(cursor, limit = 20, viewerId) {
@@ -2120,11 +2130,13 @@ var DatabaseStorage = class {
       });
       if (interactionType === "connection_request" || interactionType === "click" || interactionType === "interested" || interactionType === "not_interested") {
         const { updateUserPreferencesFromInteractions: updateUserPreferencesFromInteractions2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-        updateUserPreferencesFromInteractions2(userId).catch((error) => {
-          logger.error("Failed immediate preference refresh", { error, userId, interactionType });
-        });
+        waitUntil(
+          updateUserPreferencesFromInteractions2(userId).catch((error) => {
+            logger.error("Failed immediate preference refresh", { error, userId, interactionType });
+          })
+        );
       }
-      this.updateUserPreferencesDebounced(userId);
+      this.updateUserPreferencesThrottled(userId);
     } catch (error) {
       logger.error("Failed to track post interaction", { error, userId, postId, interactionType });
     }
@@ -2193,23 +2205,22 @@ var DatabaseStorage = class {
       trackedInteractions: Number(interactionAgg?.total || 0)
     };
   }
-  // Debounce user preference updates (update at most once per 60 seconds per user)
-  preferenceUpdateTimers = /* @__PURE__ */ new Map();
-  updateUserPreferencesDebounced(userId) {
-    const existingTimer = this.preferenceUpdateTimers.get(userId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
+  // Throttle user preference updates (update at most once per 60 seconds per user)
+  preferenceUpdateTimestamps = /* @__PURE__ */ new Map();
+  updateUserPreferencesThrottled(userId) {
+    const now = Date.now();
+    const lastUpdate = this.preferenceUpdateTimestamps.get(userId) || 0;
+    if (now - lastUpdate > 6e4) {
+      this.preferenceUpdateTimestamps.set(userId, now);
+      waitUntil((async () => {
+        try {
+          const { updateUserPreferencesFromInteractions: updateUserPreferencesFromInteractions2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
+          await updateUserPreferencesFromInteractions2(userId);
+        } catch (error) {
+          logger.error("Failed to update user preferences", { error, userId });
+        }
+      })());
     }
-    const timer = setTimeout(async () => {
-      try {
-        const { updateUserPreferencesFromInteractions: updateUserPreferencesFromInteractions2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-        await updateUserPreferencesFromInteractions2(userId);
-        this.preferenceUpdateTimers.delete(userId);
-      } catch (error) {
-        logger.error("Failed to update user preferences", { error, userId });
-      }
-    }, 6e4);
-    this.preferenceUpdateTimers.set(userId, timer);
   }
 };
 var storage = new DatabaseStorage();
@@ -2828,6 +2839,46 @@ async function getEventMatchScore(req, res, next) {
 // lib/routes.ts
 import { z as z2 } from "zod";
 
+// lib/ratelimit.ts
+init_logger();
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
+var isConfigured = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+var redis = isConfigured ? new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN
+}) : null;
+function rateLimit(opts) {
+  if (!redis) {
+    return (req, res, next) => next();
+  }
+  const windowStr = `${Math.ceil(opts.windowMs / 1e3)}s`;
+  const limiter = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(opts.max, windowStr),
+    analytics: false
+  });
+  return async (req, res, next) => {
+    try {
+      const key = opts.keyGenerator ? opts.keyGenerator(req) : req.ip || "unknown-ip";
+      const { success, limit, remaining, reset } = await limiter.limit(key);
+      if (opts.standardHeaders) {
+        res.setHeader("RateLimit-Limit", limit);
+        res.setHeader("RateLimit-Remaining", remaining);
+        res.setHeader("RateLimit-Reset", reset);
+      }
+      if (!success) {
+        res.status(429).json(opts.message);
+        return;
+      }
+      next();
+    } catch (error) {
+      logger.error("Rate limiting error (failing open)", error);
+      next();
+    }
+  };
+}
+
 // lib/middleware/auth.ts
 function requireAuth(req, res, next) {
   if (!req.user) {
@@ -2897,10 +2948,16 @@ init_schema_sqlite();
 import { Store } from "express-session";
 import { eq as eq4, lt as lt2 } from "drizzle-orm";
 var TursoSessionStore = class extends Store {
+  cache = /* @__PURE__ */ new Map();
   async get(sid, cb) {
     try {
+      const cached = this.cache.get(sid);
+      if (cached && cached.expire > Date.now()) {
+        return cb(null, cached.sess);
+      }
       const [row] = await db.select().from(session).where(eq4(session.sid, sid));
       if (!row || row.expire.getTime() < Date.now()) return cb(null, void 0);
+      this.cache.set(sid, { sess: row.sess, expire: Date.now() + 15e3 });
       cb(null, row.sess);
     } catch (err) {
       cb(err);
@@ -2908,6 +2965,7 @@ var TursoSessionStore = class extends Store {
   }
   async set(sid, sess, cb) {
     try {
+      this.cache.delete(sid);
       const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
       await db.insert(session).values({ sid, sess, expire }).onConflictDoUpdate({ target: session.sid, set: { sess, expire } });
       cb?.();
@@ -2917,6 +2975,7 @@ var TursoSessionStore = class extends Store {
   }
   async destroy(sid, cb) {
     try {
+      this.cache.delete(sid);
       await db.delete(session).where(eq4(session.sid, sid));
       cb?.();
     } catch (err) {
@@ -2926,6 +2985,12 @@ var TursoSessionStore = class extends Store {
   async touch(sid, sess, cb) {
     try {
       const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
+      this.cache.set(sid, { sess, expire: Date.now() + 15e3 });
+      const msUntilExpire = expire.getTime() - Date.now();
+      const sixHoursMs = 6 * 60 * 60 * 1e3;
+      if (msUntilExpire > sixHoursMs) {
+        return cb?.();
+      }
       await db.update(session).set({ expire }).where(eq4(session.sid, sid));
       cb?.();
     } catch (err) {
@@ -2975,7 +3040,7 @@ var {
   getTokenFromRequest: (req) => req.headers["x-csrf-token"],
   getSessionIdentifier: (req) => req.sessionID || "anonymous"
 });
-var generateCsrfToken = () => "mock-csrf-token";
+var generateCsrfToken = _generateCsrfToken;
 var allowedOrigins = [
   process.env.FRONTEND_URL,
   "https://findateammate.online",
@@ -3026,11 +3091,27 @@ async function bootstrap(req, res) {
       res.setHeader("Set-Cookie", str);
     };
   }
-  if (setCorsHeaders(req, res)) return false;
-  await runMiddleware(req, res, cookieParser());
-  await runMiddleware(req, res, sessionMiddleware);
-  await loadUser(req);
-  return true;
+  try {
+    if (setCorsHeaders(req, res)) return false;
+    await runMiddleware(req, res, cookieParser());
+    await runMiddleware(req, res, sessionMiddleware);
+    await loadUser(req);
+    const isInternal = req.url?.startsWith("/api/internal");
+    const isAnalytics = req.url?.startsWith("/api/analytics");
+    const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
+    if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
+      await runMiddleware(req, res, _doubleCsrfProtection);
+    }
+    return true;
+  } catch (error) {
+    if (error.code === "EBADCSRFTOKEN") {
+      res.status(403).json({ message: "Invalid CSRF Token" });
+    } else {
+      console.error("Middleware error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+    return false;
+  }
 }
 
 // lib/auth.ts
@@ -3140,18 +3221,20 @@ init_logger();
 import { Router } from "express";
 import { eq as eq5 } from "drizzle-orm";
 import crypto2 from "crypto";
+import { promisify } from "util";
 var authLocalRouter = Router();
-function verifyPassword(password, storedHash) {
+var scryptAsync = promisify(crypto2.scrypt);
+async function verifyPassword(password, storedHash) {
   if (!storedHash) return false;
   const [salt, key] = storedHash.split(":");
   if (!salt || !key) return false;
-  const derivedKey = crypto2.scryptSync(password, salt, 64).toString("hex");
-  return key === derivedKey;
+  const derivedKey = await scryptAsync(password, salt, 64);
+  return key === derivedKey.toString("hex");
 }
-function hashPassword(password) {
+async function hashPassword(password) {
   const salt = crypto2.randomBytes(16).toString("hex");
-  const derivedKey = crypto2.scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${derivedKey}`;
+  const derivedKey = await scryptAsync(password, salt, 64);
+  return `${salt}:${derivedKey.toString("hex")}`;
 }
 authLocalRouter.post("/login", async (req, res) => {
   try {
@@ -3164,7 +3247,7 @@ authLocalRouter.post("/login", async (req, res) => {
     if (!user || !user.password) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
-    const isValid = verifyPassword(password, user.password);
+    const isValid = await verifyPassword(password, user.password);
     if (!isValid) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
@@ -3192,7 +3275,7 @@ authLocalRouter.post("/register", async (req, res) => {
     if (existingUser.length > 0) {
       return res.status(409).json({ message: "Email already in use" });
     }
-    const hashedPassword = hashPassword(password);
+    const hashedPassword = await hashPassword(password);
     const username = `user_${crypto2.randomBytes(4).toString("hex")}`;
     const [newUser] = await db.insert(users).values({
       email,
@@ -3405,7 +3488,9 @@ init_logger();
 var internalRouter = Router2();
 internalRouter.get("/run-audit-export", async (req, res) => {
   const secret = req.headers["x-cron-secret"];
-  if (secret !== process.env.CRON_SECRET) {
+  const authHeader = req.headers.authorization;
+  const isAuthorized = secret === process.env.CRON_SECRET || authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  if (!isAuthorized) {
     logger.warn(`Unauthorized cron attempt: invalid CRON_SECRET`);
     return res.status(403).json({ error: "Forbidden" });
   }
@@ -3421,8 +3506,10 @@ internalRouter.use("/daily-cleanup", async (req, res) => {
   if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).json({ message: "Method Not Allowed" });
   }
-  const authHeader = req.headers["x-cron-secret"];
-  if (process.env.CRON_SECRET && authHeader !== process.env.CRON_SECRET) {
+  const secret = req.headers["x-cron-secret"];
+  const bearerHeader = req.headers.authorization;
+  const isAuthorized = secret === process.env.CRON_SECRET || bearerHeader === `Bearer ${process.env.CRON_SECRET}`;
+  if (process.env.CRON_SECRET && !isAuthorized) {
     return res.status(401).json({ message: "Unauthorized" });
   }
   logger.log("Running daily cleanup jobs");
@@ -3499,7 +3586,7 @@ websocketsRouter.get("/chats/:id/check-participant", async (req, res) => {
 import { Router as Router4 } from "express";
 var securityRouter = Router4();
 securityRouter.get("/csrf-token", (req, res) => {
-  const token = generateCsrfToken();
+  const token = generateCsrfToken(req, res, true);
   res.status(200).json({ csrfToken: token });
 });
 
@@ -3576,7 +3663,6 @@ import { sql as sql6, eq as eq7, and as and6, not as not2, isNull as isNull3, gt
 var app = express2();
 app.use(express2.json({ limit: "50mb" }));
 app.use(express2.urlencoded({ extended: false, limit: "50mb" }));
-var rateLimit = (options) => (req, res, next) => next();
 var ipKeyGenerator = (ip) => ip;
 var voteLimiter = rateLimit({
   windowMs: 1 * 60 * 1e3,
@@ -3618,30 +3704,6 @@ var trackSearchSchema = z2.object({
   resultsCount: z2.number().int().min(0).max(1e4).optional().default(0),
   clickedPostIds: z2.array(z2.string().min(1).max(64)).max(200).optional().default([])
 });
-async function loadUserFromSession(req, _res, next) {
-  if (!req.path.startsWith("/api")) {
-    return next();
-  }
-  if (req.user) {
-    return next();
-  }
-  if (req.session.userId) {
-    try {
-      const user = await storage.getUser(req.session.userId);
-      if (user) {
-        const { password, ...safeUser } = user;
-        req.user = safeUser;
-        storage.updateLastActive(user.id);
-      } else {
-        req.session.destroy(() => {
-        });
-      }
-    } catch (err) {
-      logger.error("Session load error", err);
-    }
-  }
-  next();
-}
 async function requireOnboarding(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ message: "Unauthorized", code: "UNAUTHORIZED" });
@@ -3667,7 +3729,6 @@ async function requireOnboarding(req, res, next) {
   next();
 }
 function registerRoutes() {
-  app.use(loadUserFromSession);
   app.use(maintenanceMiddleware);
   app.get("/", (_req, res) => {
     res.status(200).json({ status: "healthy", message: "FindATeammate API is running" });
@@ -3675,7 +3736,7 @@ function registerRoutes() {
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
   });
-  app.get("/api/diagnose-db", async (req, res) => {
+  app.get("/api/diagnose-db", requireAuth, requireAdmin, async (req, res) => {
     const diagnostics = {
       env: {
         NODE_ENV: process.env.NODE_ENV,
@@ -3762,13 +3823,12 @@ function registerRoutes() {
   });
   app.get("/api/me", async (req, res) => {
     if (req.user) {
-      const safeUser = selectUserSchema.parse(req.user);
-      return res.json(safeUser);
+      return res.json(req.user);
     }
     if (req.session.userId) {
       const user = await storage.getUser(req.session.userId);
       if (user) {
-        const safeUser = selectUserSchema.parse(user);
+        const { password, ...safeUser } = user;
         return res.json(safeUser);
       }
     }
@@ -4067,8 +4127,10 @@ function registerRoutes() {
       const currentUser = await storage.getUser(req.user.id);
       if (currentUser?.avatar?.startsWith("https://res.cloudinary.com/")) {
         logger.log(`Deleting old avatar: ${currentUser.avatar}`);
-        deleteFromCloudinary(currentUser.avatar).catch(
-          (err) => logger.error("Failed to delete old Cloudinary avatar", err)
+        waitUntil2(
+          deleteFromCloudinary(currentUser.avatar).catch(
+            (err) => logger.error("Failed to delete old Cloudinary avatar", err)
+          )
         );
       }
       const { url } = await uploadToCloudinary(
@@ -4399,8 +4461,7 @@ function registerRoutes() {
     keyGenerator: (req) => req.user?.id || ipKeyGenerator(req.ip),
     message: { message: "Too many registration attempts. Please try again later.", code: "RATE_LIMIT_EXCEEDED" }
   });
-  void registrationLimiter;
-  app.post("/api/events/:eventId/register", requireAuth, async (req, res, next) => {
+  app.post("/api/events/:eventId/register", requireAuth, registrationLimiter, async (req, res, next) => {
     try {
       if (req.user.isBanned && !req.user.isAdmin) {
         return res.status(403).json({ message: "You have been banned and cannot register for events", code: "USER_BANNED" });
@@ -4810,8 +4871,10 @@ function registerRoutes() {
       }
       await storage.updateConnectionRequestStatus(requestId, "accepted");
       const { boostPreferencesFromConnection: boostPreferencesFromConnection2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-      boostPreferencesFromConnection2(request.fromUserId, request.postId, true).catch(
-        (err) => logger.error("Failed to boost preferences from connection", { error: err })
+      waitUntil2(
+        boostPreferencesFromConnection2(request.fromUserId, request.postId, true).catch(
+          (err) => logger.error("Failed to boost preferences from connection", { error: err })
+        )
       );
       await storage.createNotification({
         userId: request.fromUserId,
@@ -4839,8 +4902,10 @@ function registerRoutes() {
       }
       await storage.updateConnectionRequestStatus(requestId, "rejected");
       const { boostPreferencesFromConnection: boostPreferencesFromConnection2 } = await Promise.resolve().then(() => (init_recommendations(), recommendations_exports));
-      boostPreferencesFromConnection2(request.fromUserId, request.postId, false).catch(
-        (err) => logger.error("Failed to apply feedback from rejection", { error: err })
+      waitUntil2(
+        boostPreferencesFromConnection2(request.fromUserId, request.postId, false).catch(
+          (err) => logger.error("Failed to apply feedback from rejection", { error: err })
+        )
       );
       res.json({ success: true });
     } catch (error) {
@@ -5180,10 +5245,10 @@ function registerRoutes() {
         pendingReports: Number(pendingReportCountResult[0].count),
         postsByDate,
         skills: await db.all(sql6`
-          SELECT skill_item as name, COUNT(*) as count
-          FROM ${users}, jsonb_array_elements_text(skills) as skill_item
-          WHERE skills IS NOT NULL AND jsonb_array_length(skills) > 0
-          GROUP BY skill_item
+          SELECT json_each.value as name, COUNT(*) as count
+          FROM ${users}, json_each(skills)
+          WHERE skills IS NOT NULL AND json_array_length(skills) > 0
+          GROUP BY json_each.value
           ORDER BY count DESC
           LIMIT 10
         `).then((res2) => {
@@ -5903,6 +5968,21 @@ Check Admin Dashboard for details.`,
     } catch (error) {
       logger.error("Health check failed", error);
       res.status(503).json({ status: "error", message: "Database connection failed" });
+    }
+  });
+  app.get("/api/docs", async (_req, res, next) => {
+    try {
+      const fs = (await import("fs")).default;
+      const path2 = (await import("path")).default;
+      const docsPath = path2.join(process.cwd(), "docs", "api.md");
+      if (fs.existsSync(docsPath)) {
+        res.setHeader("Content-Type", "text/markdown");
+        res.send(fs.readFileSync(docsPath, "utf8"));
+      } else {
+        res.status(404).json({ message: "Docs not found" });
+      }
+    } catch (error) {
+      next(error);
     }
   });
   app.use("/api", (_req, res) => {

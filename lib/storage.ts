@@ -1,6 +1,7 @@
 import { users, posts, connectionRequests, messages, analytics, notifications, eventVotes, reports, systemSettings, auditLogs, feedback, eventRegistrations, postInteractions, userSearches, type User, type InsertUser, type Post, type InsertPost, type ConnectionRequest, type InsertConnectionRequest, type EventRegistration, type InsertEventRegistration, type Message, type InsertMessage, type Notification, type InsertNotification, type Analytics, type InsertAnalytics, type ChatWithDetails, type Report, type InsertReport, type SystemSetting, type AuditLog, type InsertAuditLog, type Feedback, type InsertFeedback } from "../shared/schema.sqlite";
 import { db } from "./db";
 import { logger } from "./logger";
+import { waitUntil } from "@vercel/functions";
 class MemoryCache<T> {
   private cache = new Map<string, T>();
   constructor(private ttlSeconds: number = 60) {}
@@ -241,12 +242,15 @@ export class DatabaseStorage implements IStorage {
     if (now - lastUpdate > 5 * 60 * 1000) {
       this.lastActiveUpdates.set(id, now);
       
-      // Await to prevent Vercel from freezing container mid-query and breaking the connection pool
-      await db.update(users)
-        .set({ lastActive: new Date() })
-        .where(eq(users.id, id))
-        .execute()
-        .catch(err => logger.error("Failed to update lastActive", err));
+      // Use waitUntil to prevent Vercel from freezing container mid-query
+      // without forcing the user to wait for the update to finish.
+      waitUntil(
+        db.update(users)
+          .set({ lastActive: new Date() })
+          .where(eq(users.id, id))
+          .execute()
+          .catch(err => logger.error("Failed to update lastActive", err))
+      );
     }
   }
 
@@ -1202,13 +1206,15 @@ export class DatabaseStorage implements IStorage {
         interactionType === "not_interested"
       ) {
         const { updateUserPreferencesFromInteractions } = await import("./recommendations");
-        updateUserPreferencesFromInteractions(userId).catch((error) => {
-          logger.error("Failed immediate preference refresh", { error, userId, interactionType });
-        });
+        waitUntil(
+          updateUserPreferencesFromInteractions(userId).catch((error) => {
+            logger.error("Failed immediate preference refresh", { error, userId, interactionType });
+          })
+        );
       }
 
       // Update user preferences asynchronously (don't await)
-      this.updateUserPreferencesDebounced(userId);
+      this.updateUserPreferencesThrottled(userId);
     } catch (error) {
       logger.error("Failed to track post interaction", { error, userId, postId, interactionType });
       // Don't throw - tracking failures shouldn't break user experience
@@ -1315,28 +1321,25 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  // Debounce user preference updates (update at most once per 60 seconds per user)
-  private preferenceUpdateTimers = new Map<string, NodeJS.Timeout>();
+  // Throttle user preference updates (update at most once per 60 seconds per user)
+  private preferenceUpdateTimestamps = new Map<string, number>();
 
-  private updateUserPreferencesDebounced(userId: string): void {
-    // Clear existing timer
-    const existingTimer = this.preferenceUpdateTimers.get(userId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
+  private updateUserPreferencesThrottled(userId: string): void {
+    const now = Date.now();
+    const lastUpdate = this.preferenceUpdateTimestamps.get(userId) || 0;
+
+    if (now - lastUpdate > 60000) {
+      this.preferenceUpdateTimestamps.set(userId, now);
+      
+      waitUntil((async () => {
+        try {
+          const { updateUserPreferencesFromInteractions } = await import("./recommendations");
+          await updateUserPreferencesFromInteractions(userId);
+        } catch (error) {
+          logger.error("Failed to update user preferences", { error, userId });
+        }
+      })());
     }
-
-    // Set new timer
-    const timer = setTimeout(async () => {
-      try {
-        const { updateUserPreferencesFromInteractions } = await import("./recommendations");
-        await updateUserPreferencesFromInteractions(userId);
-        this.preferenceUpdateTimers.delete(userId);
-      } catch (error) {
-        logger.error("Failed to update user preferences", { error, userId });
-      }
-    }, 60000); // 60 seconds debounce
-
-    this.preferenceUpdateTimers.set(userId, timer);
   }
 
 
