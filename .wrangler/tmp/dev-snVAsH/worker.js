@@ -2978,7 +2978,7 @@ var Chat = class extends Server {
       console.warn("[ChatRoom] Could not verify participant on first try, retrying in case of cold start:", err);
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2e3);
+        const timeout = setTimeout(() => controller.abort("Auth fetch retry timed out"), 2e3);
         const retryRes = await fetch(`${apiUrl}/api/chats/${chatId}/check-participant`, {
           headers: {
             "x-partykit-secret": this.env.PARTYKIT_SECRET,
@@ -3201,7 +3201,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env3, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-vWE0mI/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-CwUtuL/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -3233,7 +3233,7 @@ function __facade_invoke__(request, env3, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-vWE0mI/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-CwUtuL/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
