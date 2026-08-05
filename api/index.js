@@ -546,7 +546,18 @@ var init_db = __esm({
     dbUrl = process.env.TURSO_DATABASE_URL.replace(/^libsql:\/\//, "https://");
     tursoClient = createClient({
       url: dbUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN
+      authToken: process.env.TURSO_AUTH_TOKEN,
+      // Fix Vercel Serverless Node 20 fetch keep-alive hanging bug
+      fetch: (url, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set("Connection", "close");
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3e3);
+        if (init?.signal) {
+          init.signal.addEventListener("abort", () => controller.abort());
+        }
+        return fetch(url, { ...init, headers, signal: controller.signal }).finally(() => clearTimeout(timeout));
+      }
     });
     db = drizzle(tursoClient, { schema: schema_sqlite_exports });
   }
@@ -2947,43 +2958,86 @@ init_db();
 init_schema_sqlite();
 import { Store } from "express-session";
 import { eq as eq4, lt as lt2 } from "drizzle-orm";
+console.log("session starts-----");
+async function withTimeout(promise, ms, label) {
+  console.log("session starts inside withTimeout-----");
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  console.log("inside withTimeout before try");
+  try {
+    console.log("inside withTimeout try");
+    return await Promise.race([promise, timeout]);
+  } finally {
+    console.log("inside withTimeout finally");
+    clearTimeout(timer);
+  }
+}
 var TursoSessionStore = class extends Store {
   cache = /* @__PURE__ */ new Map();
   async get(sid, cb) {
+    console.log("inside get-----------------");
     try {
+      console.log("inside try");
       const cached = this.cache.get(sid);
       if (cached && cached.expire > Date.now()) {
+        console.log("inside cache hit");
         return cb(null, cached.sess);
       }
-      const [row] = await db.select().from(session).where(eq4(session.sid, sid));
+      console.log("before await withTimeout get");
+      const [row] = await withTimeout(
+        db.select().from(session).where(eq4(session.sid, sid)),
+        2e3,
+        "TursoSessionStore.get"
+      );
+      console.log("after await withTimeout get");
       if (!row || row.expire.getTime() < Date.now()) return cb(null, void 0);
       this.cache.set(sid, { sess: row.sess, expire: Date.now() + 15e3 });
+      console.log("after cache set");
       cb(null, row.sess);
     } catch (err) {
-      cb(err);
+      console.error("TursoSessionStore.get error:", err);
+      cb(null, void 0);
     }
   }
   async set(sid, sess, cb) {
+    console.log("inside set-----------------");
     try {
       this.cache.delete(sid);
       const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
-      await db.insert(session).values({ sid, sess, expire }).onConflictDoUpdate({ target: session.sid, set: { sess, expire } });
+      console.log("before await withTimeout set");
+      await withTimeout(
+        db.insert(session).values({ sid, sess, expire }).onConflictDoUpdate({ target: session.sid, set: { sess, expire } }),
+        2e3,
+        "TursoSessionStore.set"
+      );
+      console.log("after await withTimeout set");
       cb?.();
     } catch (err) {
+      console.error("TursoSessionStore.set error:", err);
       cb?.(err);
     }
   }
   async destroy(sid, cb) {
     try {
       this.cache.delete(sid);
-      await db.delete(session).where(eq4(session.sid, sid));
+      console.log("before await withTimeout destroy");
+      await withTimeout(
+        db.delete(session).where(eq4(session.sid, sid)),
+        2e3,
+        "TursoSessionStore.destroy"
+      );
+      console.log("after await withTimeout destroy");
       cb?.();
     } catch (err) {
+      console.error("TursoSessionStore.destroy error:", err);
       cb?.(err);
     }
   }
   async touch(sid, sess, cb) {
     try {
+      console.log("inside touch-----------------");
       const expire = new Date(sess.cookie?.expires ?? Date.now() + 3 * 24 * 60 * 60 * 1e3);
       this.cache.set(sid, { sess, expire: Date.now() + 15e3 });
       const msUntilExpire = expire.getTime() - Date.now();
@@ -2991,9 +3045,16 @@ var TursoSessionStore = class extends Store {
       if (msUntilExpire > sixHoursMs) {
         return cb?.();
       }
-      await db.update(session).set({ expire }).where(eq4(session.sid, sid));
+      console.log("before await withTimeout touch");
+      await withTimeout(
+        db.update(session).set({ expire }).where(eq4(session.sid, sid)),
+        2e3,
+        "TursoSessionStore.touch"
+      );
+      console.log("after await withTimeout touch");
       cb?.();
     } catch (err) {
+      console.error("TursoSessionStore.touch error:", err);
       cb?.(err);
     }
   }
@@ -3074,7 +3135,9 @@ async function loadUser(req) {
   const userId = req.session?.userId || req.session?.passport?.user;
   if (!userId) return;
   try {
-    const user = await storage.getUser(userId);
+    const userPromise = storage.getUser(userId);
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("loadUser Turso Query Timed Out")), 3e3));
+    const user = await Promise.race([userPromise, timeoutPromise]);
     if (user) {
       const { password, ...safeUser } = user;
       req.user = safeUser;
@@ -3093,15 +3156,20 @@ async function bootstrap(req, res) {
   }
   try {
     if (setCorsHeaders(req, res)) return false;
+    console.log("Cookieparser----");
     await runMiddleware(req, res, cookieParser());
+    console.log("sessionMiddleware-----");
     await runMiddleware(req, res, sessionMiddleware);
     await loadUser(req);
     const isInternal = req.url?.startsWith("/api/internal");
     const isAnalytics = req.url?.startsWith("/api/analytics");
     const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
+    console.log("before doubleCsrfProtection");
     if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
       await runMiddleware(req, res, _doubleCsrfProtection);
+      console.log("inside doubleCsrfProtection");
     }
+    console.log("after doubleCsrfProtection");
     return true;
   } catch (error) {
     if (error.code === "EBADCSRFTOKEN") {
@@ -3224,6 +3292,17 @@ import crypto2 from "crypto";
 import { promisify } from "util";
 var authLocalRouter = Router();
 var scryptAsync = promisify(crypto2.scrypt);
+async function withTimeout2(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function verifyPassword(password, storedHash) {
   if (!storedHash) return false;
   const [salt, key] = storedHash.split(":");
@@ -3242,7 +3321,11 @@ authLocalRouter.post("/login", async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ message: "Email and password are required" });
     }
-    const existingUsers = await db.select().from(users).where(eq5(users.email, email)).limit(1);
+    const existingUsers = await withTimeout2(
+      db.select().from(users).where(eq5(users.email, email)).limit(1),
+      5e3,
+      "Turso DB Login Query"
+    );
     const user = existingUsers[0];
     if (!user || !user.password) {
       return res.status(401).json({ message: "Invalid email or password" });
@@ -3271,13 +3354,17 @@ authLocalRouter.post("/register", async (req, res) => {
     if (!email || !password || !name) {
       return res.status(400).json({ message: "Email, password, and name are required" });
     }
-    const existingUser = await db.select().from(users).where(eq5(users.email, email)).limit(1);
+    const existingUser = await withTimeout2(
+      db.select().from(users).where(eq5(users.email, email)).limit(1),
+      5e3,
+      "Turso DB Signup Check"
+    );
     if (existingUser.length > 0) {
       return res.status(409).json({ message: "Email already in use" });
     }
     const hashedPassword = await hashPassword(password);
     const username = `user_${crypto2.randomBytes(4).toString("hex")}`;
-    const [newUser] = await db.insert(users).values({
+    const insertData = {
       email,
       name,
       username,
@@ -3291,7 +3378,12 @@ authLocalRouter.post("/register", async (req, res) => {
       city: "",
       university: "",
       privacy: { showEmail: false, showPortfolio: false, showUniversity: false, showCity: false }
-    }).returning();
+    };
+    const [newUser] = await withTimeout2(
+      db.insert(users).values(insertData).returning(),
+      5e3,
+      "Turso DB Signup Insert"
+    );
     res.status(201).json(newUser);
   } catch (error) {
     logger.error("Registration error", error);
@@ -3539,13 +3631,55 @@ internalRouter.use("/daily-cleanup", async (req, res) => {
   return res.status(200).json({ success: true, jobs });
 });
 
-// lib/routes/websockets.ts
+// lib/routes/diagnostic.ts
 init_db();
 init_schema_sqlite();
 import { Router as Router3 } from "express";
+var diagnosticRouter = Router3();
+diagnosticRouter.get("/test-waituntil", async (req, res) => {
+  const start = Date.now();
+  try {
+    const timeoutPromise = new Promise(
+      (_, reject) => setTimeout(() => reject(new Error("Turso query hard timeout (5s)")), 5e3)
+    );
+    const queryPromise = db.select().from(users).limit(1);
+    await Promise.race([queryPromise, timeoutPromise]);
+    const duration = Date.now() - start;
+    res.status(200).json({
+      success: true,
+      message: `Turso connected successfully in ${duration}ms!`,
+      env: {
+        nodeEnv: process.env.NODE_ENV,
+        hasDbUrl: !!process.env.TURSO_DATABASE_URL,
+        dbUrlPrefix: process.env.TURSO_DATABASE_URL?.substring(0, 15) + "...",
+        hasAuthToken: !!process.env.TURSO_AUTH_TOKEN
+      }
+    });
+  } catch (error) {
+    const duration = Date.now() - start;
+    res.status(500).json({
+      success: false,
+      message: "Turso connection failed",
+      error: error.message,
+      stack: error.stack,
+      durationMs: duration,
+      env: {
+        nodeEnv: process.env.NODE_ENV,
+        hasDbUrl: !!process.env.TURSO_DATABASE_URL,
+        dbUrlPrefix: process.env.TURSO_DATABASE_URL?.substring(0, 15) + "...",
+        hasAuthToken: !!process.env.TURSO_AUTH_TOKEN
+      }
+    });
+  }
+});
+
+// lib/routes/websockets.ts
+init_db();
+init_schema_sqlite();
+import { Router as Router4 } from "express";
 import jwt from "jsonwebtoken";
 import { eq as eq6 } from "drizzle-orm";
-var websocketsRouter = Router3();
+var websocketsRouter = Router4();
 var WS_JWT_SECRET = process.env.WS_JWT_SECRET;
 var WS_JWT_EXPIRES_IN = "8h";
 websocketsRouter.get("/ws-token", requireAuth, (req, res) => {
@@ -3583,12 +3717,12 @@ websocketsRouter.get("/chats/:id/check-participant", async (req, res) => {
 });
 
 // lib/routes/security.ts
-import { Router as Router4 } from "express";
-var securityRouter = Router4();
+import { Router as Router5 } from "express";
+var securityRouter = Router5();
 securityRouter.get("/csrf-token", (req, res) => {
-  console.log("csrf-token-----start index file")
+  console.log("csrf-token-----start");
   const token = generateCsrfToken(req, res, true);
-  console.log("csrf-token-----end index file")
+  console.log("csrf-token-----end");
   res.status(200).json({ csrfToken: token });
 });
 
@@ -3663,6 +3797,7 @@ async function maintenanceMiddleware(req, res, next) {
 // lib/routes.ts
 import { sql as sql6, eq as eq7, and as and6, not as not2, isNull as isNull3, gt as gt3, inArray as inArray5, desc as desc3 } from "drizzle-orm";
 var app = express2();
+app.set("trust-proxy", 1);
 app.use(express2.json({ limit: "50mb" }));
 app.use(express2.urlencoded({ extended: false, limit: "50mb" }));
 var ipKeyGenerator = (ip) => ip;
@@ -3778,6 +3913,7 @@ function registerRoutes() {
   app.use("/api/auth", authApp);
   app.use("/api/auth", authLocalRouter);
   app.use("/api/internal", internalRouter);
+  app.use("/api/internal", diagnosticRouter);
   app.use("/api", websocketsRouter);
   app.use("/api", securityRouter);
   app.post("/api/auth/mock", async (req, res, next) => {
@@ -4078,10 +4214,10 @@ function registerRoutes() {
       logger.log(`File upload initiated: ${req.file.originalname} (${(req.file.size / 1024).toFixed(2)}KB) by user ${req.user.id}`);
       const hex = req.file.buffer.slice(0, 4).toString("hex").toUpperCase();
       const isValid = hex.startsWith("FFD8FF") || // JPEG
-        hex.startsWith("89504E47") || // PNG
-        hex.startsWith("47494638") || // GIF
-        hex.startsWith("52494646") || // WEBP (RIFF container)
-        hex.startsWith("25504446");
+      hex.startsWith("89504E47") || // PNG
+      hex.startsWith("47494638") || // GIF
+      hex.startsWith("52494646") || // WEBP (RIFF container)
+      hex.startsWith("25504446");
       if (!isValid) {
         logger.warn(`Security Block: file ${req.file.originalname} has invalid signature ${hex} (user: ${req.user.id})`);
         return res.status(400).json({ message: "Invalid file content (signature mismatch)" });
@@ -4119,9 +4255,9 @@ function registerRoutes() {
       }
       const hex = req.file.buffer.slice(0, 4).toString("hex").toUpperCase();
       const isValid = hex.startsWith("FFD8FF") || // JPEG
-        hex.startsWith("89504E47") || // PNG
-        hex.startsWith("47494638") || // GIF
-        hex.startsWith("52494646");
+      hex.startsWith("89504E47") || // PNG
+      hex.startsWith("47494638") || // GIF
+      hex.startsWith("52494646");
       if (!isValid) {
         logger.warn(`Avatar security block: invalid signature ${hex} from user ${req.user.id}`);
         return res.status(400).json({ message: "Invalid file content (signature mismatch - avatars must be images)" });
@@ -6026,6 +6162,9 @@ Check Admin Dashboard for details.`,
 registerRoutes();
 var handler = serverless(app, { binary: [] });
 async function entry_default(req, res) {
+  if (req.url && req.url.includes("/api/internal/test-waituntil")) {
+    return handler(req, res);
+  }
   if (!await bootstrap(req, res)) return;
   return handler(req, res);
 }
