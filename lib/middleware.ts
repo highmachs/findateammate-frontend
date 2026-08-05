@@ -87,7 +87,9 @@ export async function loadUser(req: any): Promise<void> {
   if (!userId) return;
 
   try {
-    const user = await storage.getUser(userId);
+    const userPromise = storage.getUser(userId);
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("loadUser Turso Query Timed Out")), 3000));
+    const user = await Promise.race([userPromise, timeoutPromise]) as any;
     if (user) {
       const { password, ...safeUser } = user;
       req.user = safeUser;
