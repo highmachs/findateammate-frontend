@@ -535,7 +535,7 @@ var init_schema_sqlite = __esm({
 // lib/db.ts
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-var dbUrl, tursoClient, db;
+var isVercel, dbUrl, tursoClient, db;
 var init_db = __esm({
   "lib/db.ts"() {
     "use strict";
@@ -543,21 +543,24 @@ var init_db = __esm({
     if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
       throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set.");
     }
-    dbUrl = process.env.TURSO_DATABASE_URL.replace(/^libsql:\/\//, "https://");
+    isVercel = process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+    dbUrl = isVercel ? process.env.TURSO_DATABASE_URL.replace(/^libsql:\/\//, "https://") : process.env.TURSO_DATABASE_URL;
     tursoClient = createClient({
       url: dbUrl,
       authToken: process.env.TURSO_AUTH_TOKEN,
       // Fix Vercel Serverless Node 20 fetch keep-alive hanging bug
-      fetch: (url, init) => {
-        const headers = new Headers(init?.headers);
-        headers.set("Connection", "close");
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3e3);
-        if (init?.signal) {
-          init.signal.addEventListener("abort", () => controller.abort());
+      ...isVercel ? {
+        fetch: (url, init) => {
+          const headers = new Headers(init?.headers);
+          headers.set("Connection", "close");
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3e3);
+          if (init?.signal) {
+            init.signal.addEventListener("abort", () => controller.abort());
+          }
+          return fetch(url, { ...init, headers, signal: controller.signal }).finally(() => clearTimeout(timeout));
         }
-        return fetch(url, { ...init, headers, signal: controller.signal }).finally(() => clearTimeout(timeout));
-      }
+      } : {}
     });
     db = drizzle(tursoClient, { schema: schema_sqlite_exports });
   }
@@ -2937,19 +2940,6 @@ function optionalAuth(_req, _res, next) {
   next();
 }
 
-// lib/routes.ts
-init_cloudinary();
-init_db();
-import multer from "multer";
-import path from "path";
-
-// lib/auth.ts
-import express from "express";
-import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import crypto from "crypto";
-init_logger();
-
 // lib/middleware.ts
 import session2 from "express-session";
 
@@ -2988,7 +2978,7 @@ var TursoSessionStore = class extends Store {
       console.log("before await withTimeout get");
       const [row] = await withTimeout(
         db.select().from(session).where(eq4(session.sid, sid)),
-        2e3,
+        5e3,
         "TursoSessionStore.get"
       );
       console.log("after await withTimeout get");
@@ -3009,7 +2999,7 @@ var TursoSessionStore = class extends Store {
       console.log("before await withTimeout set");
       await withTimeout(
         db.insert(session).values({ sid, sess, expire }).onConflictDoUpdate({ target: session.sid, set: { sess, expire } }),
-        2e3,
+        5e3,
         "TursoSessionStore.set"
       );
       console.log("after await withTimeout set");
@@ -3025,7 +3015,7 @@ var TursoSessionStore = class extends Store {
       console.log("before await withTimeout destroy");
       await withTimeout(
         db.delete(session).where(eq4(session.sid, sid)),
-        2e3,
+        5e3,
         "TursoSessionStore.destroy"
       );
       console.log("after await withTimeout destroy");
@@ -3068,7 +3058,6 @@ var sessionStore = new TursoSessionStore();
 
 // lib/middleware.ts
 import { doubleCsrf } from "csrf-csrf";
-import cookieParser from "cookie-parser";
 var isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
 var sessionMiddleware = session2({
   store: sessionStore,
@@ -3108,7 +3097,7 @@ var allowedOrigins = [
   "https://findateammate.info",
   ...isProduction ? [] : ["http://localhost:5000", "http://localhost:5173", "http://localhost:3000"]
 ].filter(Boolean);
-function setCorsHeaders(req, res) {
+function corsMiddleware(req, res, next) {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -3118,22 +3107,14 @@ function setCorsHeaders(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-csrf-token, Authorization");
   if (req.method === "OPTIONS") {
     res.status(204).end();
-    return true;
+    return;
   }
-  return false;
+  next();
 }
-function runMiddleware(req, res, fn) {
-  return new Promise((resolve, reject) => {
-    fn(req, res, (result) => {
-      if (result instanceof Error) return reject(result);
-      resolve();
-    });
-  });
-}
-async function loadUser(req) {
-  if (req.user) return;
+async function loadUserMiddleware(req, res, next) {
+  if (req.user) return next();
   const userId = req.session?.userId || req.session?.passport?.user;
-  if (!userId) return;
+  if (!userId) return next();
   try {
     const userPromise = storage.getUser(userId);
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("loadUser Turso Query Timed Out")), 3e3));
@@ -3146,43 +3127,41 @@ async function loadUser(req) {
     }
   } catch {
   }
+  next();
 }
-async function bootstrap(req, res) {
-  if (!res.cookie) {
-    res.cookie = (name, val, opts) => {
-      const str = `${name}=${val}; Path=/` + (opts?.httpOnly ? "; HttpOnly" : "");
-      res.setHeader("Set-Cookie", str);
-    };
-  }
-  try {
-    if (setCorsHeaders(req, res)) return false;
-    console.log("Cookieparser----");
-    await runMiddleware(req, res, cookieParser());
-    console.log("sessionMiddleware-----");
-    await runMiddleware(req, res, sessionMiddleware);
-    await loadUser(req);
-    const isInternal = req.url?.startsWith("/api/internal");
-    const isAnalytics = req.url?.startsWith("/api/analytics");
-    const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
-    console.log("before doubleCsrfProtection");
-    if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
-      await runMiddleware(req, res, _doubleCsrfProtection);
-      console.log("inside doubleCsrfProtection");
-    }
-    console.log("after doubleCsrfProtection");
-    return true;
-  } catch (error) {
-    if (error.code === "EBADCSRFTOKEN") {
-      res.status(403).json({ message: "Invalid CSRF Token" });
-    } else {
-      console.error("Middleware error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-    return false;
+function csrfMiddleware(req, res, next) {
+  const isInternal = req.url?.startsWith("/api/internal");
+  const isAnalytics = req.url?.startsWith("/api/analytics");
+  const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
+  if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
+    _doubleCsrfProtection(req, res, (err) => {
+      if (err) {
+        if (err.code === "EBADCSRFTOKEN") {
+          return res.status(403).json({ message: "Invalid CSRF Token" });
+        }
+        console.error("CSRF Middleware error:", err);
+        return res.status(500).json({ message: "Internal server error" });
+      }
+      next();
+    });
+  } else {
+    next();
   }
 }
 
+// lib/routes.ts
+init_cloudinary();
+init_db();
+import cookieParser from "cookie-parser";
+import multer from "multer";
+import path from "path";
+
 // lib/auth.ts
+import express from "express";
+import passport from "passport";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import crypto from "crypto";
+init_logger();
 var authApp = express();
 authApp.use(sessionMiddleware);
 authApp.use(passport.initialize());
@@ -3873,6 +3852,11 @@ async function requireOnboarding(req, res, next) {
   next();
 }
 function registerRoutes() {
+  app.use(corsMiddleware);
+  app.use(cookieParser());
+  app.use(sessionMiddleware);
+  app.use(loadUserMiddleware);
+  app.use(csrfMiddleware);
   app.use(maintenanceMiddleware);
   app.get("/", (_req, res) => {
     res.status(200).json({ status: "healthy", message: "FindATeammate API is running" });
@@ -6171,14 +6155,7 @@ Check Admin Dashboard for details.`,
 
 // api/_entry.ts
 registerRoutes();
-var handler = serverless(app, { binary: [] });
-async function entry_default(req, res) {
-  if (req.url && req.url.includes("/api/internal/test-waituntil")) {
-    return handler(req, res);
-  }
-  if (!await bootstrap(req, res)) return;
-  return handler(req, res);
-}
+var entry_default = serverless(app, { binary: [] });
 export {
   entry_default as default
 };
