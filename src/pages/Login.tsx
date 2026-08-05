@@ -82,7 +82,7 @@ export default function Login() {
                     <div className="text-sm text-muted-foreground pt-4 border-t border-border/30 w-full text-center">
                         Don't have an account?{" "}
                         <Link href="/register">
-                            <a className="font-bold text-primary hover:underline">Sign up with Google</a>
+                            <span className="font-bold text-primary hover:underline cursor-pointer">Sign up with Google</span>
                         </Link>
                     </div>
                 </CardFooter>
