@@ -14,6 +14,12 @@ const dbUrl = process.env.TURSO_DATABASE_URL.replace(/^libsql:\/\//, "https://")
 export const tursoClient = createClient({
   url: dbUrl,
   authToken: process.env.TURSO_AUTH_TOKEN,
+  // Fix Vercel Serverless Node 20 fetch keep-alive hanging bug
+  fetch: (url, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set('Connection', 'close');
+    return fetch(url, { ...init, headers });
+  }
 });
 
 export const db = drizzle(tursoClient, { schema });
