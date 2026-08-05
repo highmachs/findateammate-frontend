@@ -1,8 +1,11 @@
 import serverless from "serverless-http";
-import { app, registerRoutes } from "../lib/routes";
+import express from "express";
 
-// Initialize the Express routes once per cold start
-registerRoutes();
+const app = express();
 
-// Delegate to the Express app via serverless-http adapter
+app.get("/api/ping", (req, res) => {
+  console.log("PING");
+  res.json({ ok: true });
+});
+
 export default serverless(app, { binary: [] });
