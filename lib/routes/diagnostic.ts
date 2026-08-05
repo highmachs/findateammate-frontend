@@ -8,29 +8,41 @@ import { logger } from "../logger";
 export const diagnosticRouter = Router();
 
 diagnosticRouter.get("/test-waituntil", async (req, res) => {
-  // This endpoint returns 200 OK immediately, but queues a background task
-  // to verify if Fluid Compute / waitUntil is actually working.
-  
-  waitUntil(
-    (async () => {
-      try {
-        // Wait 3 seconds (well after the HTTP response is sent)
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        
-        // Write a marker row to the database (or just do a select query)
-        const start = Date.now();
-        await db.select().from(users).limit(1);
-        const duration = Date.now() - start;
-        
-        logger.info(`WaitUntil Diagnostic Success: DB queried in ${duration}ms AFTER response was sent.`);
-      } catch (err) {
-        logger.error("WaitUntil Diagnostic Error", err);
+  // Test Turso directly from Vercel bypassing all middleware
+  const start = Date.now();
+  try {
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Turso query hard timeout (5s)")), 5000)
+    );
+    const queryPromise = db.select().from(users).limit(1);
+    
+    await Promise.race([queryPromise, timeoutPromise]);
+    const duration = Date.now() - start;
+    
+    res.status(200).json({ 
+      success: true,
+      message: `Turso connected successfully in ${duration}ms!`,
+      env: {
+        nodeEnv: process.env.NODE_ENV,
+        hasDbUrl: !!process.env.TURSO_DATABASE_URL,
+        dbUrlPrefix: process.env.TURSO_DATABASE_URL?.substring(0, 15) + "...",
+        hasAuthToken: !!process.env.TURSO_AUTH_TOKEN
       }
-    })()
-  );
-
-  res.status(200).json({ 
-    message: "Response sent. Check Vercel logs in 4 seconds to see if the background task completed.",
-    timestamp: new Date().toISOString()
-  });
+    });
+  } catch (error: any) {
+    const duration = Date.now() - start;
+    res.status(500).json({
+      success: false,
+      message: "Turso connection failed",
+      error: error.message,
+      stack: error.stack,
+      durationMs: duration,
+      env: {
+        nodeEnv: process.env.NODE_ENV,
+        hasDbUrl: !!process.env.TURSO_DATABASE_URL,
+        dbUrlPrefix: process.env.TURSO_DATABASE_URL?.substring(0, 15) + "...",
+        hasAuthToken: !!process.env.TURSO_AUTH_TOKEN
+      }
+    });
+  }
 });
