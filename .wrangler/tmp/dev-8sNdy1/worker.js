@@ -3156,7 +3156,7 @@ var Global = class extends Server {
 // party/worker.ts
 var worker_default = {
   async fetch(request, env3) {
-    return routePartykitRequest(request, env3) || new Response("Not found", { status: 404 });
+    return await routePartykitRequest(request, env3) || new Response("Not found", { status: 404 });
   }
 };
 

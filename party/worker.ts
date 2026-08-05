@@ -10,7 +10,7 @@ export { Chat, Notifications, Global };
 export default {
   async fetch(request: Request, env: Record<string, unknown>) {
     // partyserver's router matches the URL path to the correct DO class
-    return routePartykitRequest(request, env) ||
+    return (await routePartykitRequest(request, env)) || 
       new Response("Not found", { status: 404 });
   },
 };
