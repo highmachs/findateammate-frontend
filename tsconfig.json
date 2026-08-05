@@ -24,5 +24,6 @@
     }
   },
   "include": ["src", "api", "party", "lib", "shared"],
+  "exclude": ["findateammate-backend"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

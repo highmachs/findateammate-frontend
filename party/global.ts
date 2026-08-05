@@ -2,6 +2,9 @@ import { Server, type Connection, type ConnectionContext } from "partyserver";
 import { verifyWsToken } from "./lib/auth";
 
 export class Global extends Server {
+  declare env: Record<string, unknown>;
+  declare ctx: any;
+
   async onConnect(conn: Connection, ctx: ConnectionContext) {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");

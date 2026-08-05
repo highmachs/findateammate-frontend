@@ -3,6 +3,7 @@ import { verifyWsToken } from "./lib/auth";
 
 // Each instance = one chat room (room name = chatId)
 export class Chat extends Server {
+  declare env: Record<string, unknown>;
   private connectionUsers = new Map<string, string>();
 
   async onConnect(conn: Connection, ctx: ConnectionContext) {
