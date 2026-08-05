@@ -32,6 +32,7 @@ import { db } from "./db";
 import { authApp } from "./auth";
 import { authLocalRouter } from "./routes/auth-local";
 import { internalRouter } from "./routes/internal";
+import { diagnosticRouter } from "./routes/diagnostic";
 import { websocketsRouter } from "./routes/websockets";
 import { securityRouter } from "./routes/security";
 import { posts, users, analytics, postInteractions } from "@shared/schema.sqlite";
@@ -230,6 +231,7 @@ export function registerRoutes() {
   app.use("/api/auth", authApp); // Mount Google OAuth (authApp)
   app.use("/api/auth", authLocalRouter); // Mount Local Auth
   app.use("/api/internal", internalRouter);
+  app.use("/api/internal", diagnosticRouter);
   app.use("/api", websocketsRouter);
   app.use("/api", securityRouter);
 
