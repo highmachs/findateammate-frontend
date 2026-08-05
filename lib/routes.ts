@@ -167,12 +167,32 @@ async function requireOnboarding(req: any, res: any, next: any) {
 export function registerRoutes() {
   // Passport Setup moved to auth.ts
 
+  // --- DIAGNOSTIC LOGGERS ADDED FOR VERCEL DEBUGGING ---
+  app.use((req, res, next) => {
+    console.log("Express global logger - received:", req.method, req.originalUrl, "url:", req.url);
+    next();
+  });
 
+  app.get("/api/ping", (req, res) => {
+    console.log("PING route hit");
+    res.json({ ok: true });
+  });
+
+  app.use((req, res, next) => {
+    console.log("Before maintenanceMiddleware");
+    next();
+  });
+  // -----------------------------------------------------
 
   // User loading middleware is now handled via bootstrap() in api/_entry.ts
 
   // Maintenance Mode Check
   app.use(maintenanceMiddleware);
+
+  app.use((req, res, next) => {
+    console.log("After maintenanceMiddleware");
+    next();
+  });
 
   // Root Health Check (Vital for Render/Deployment checks)
   app.get("/", (_req, res) => {
@@ -229,12 +249,25 @@ export function registerRoutes() {
   });
 
   // Vercel Serverless Function replacements
+  app.use((req, res, next) => { console.log("Before authApp"); next(); });
   app.use("/api/auth", authApp); // Mount Google OAuth (authApp)
+  
+  app.use((req, res, next) => { console.log("Before authLocalRouter"); next(); });
   app.use("/api/auth", authLocalRouter); // Mount Local Auth
+  
+  app.use((req, res, next) => { console.log("Before internalRouter"); next(); });
   app.use("/api/internal", internalRouter);
+  
+  app.use((req, res, next) => { console.log("Before diagnosticRouter"); next(); });
   app.use("/api/internal", diagnosticRouter);
+  
+  app.use((req, res, next) => { console.log("Before websocketsRouter"); next(); });
   app.use("/api", websocketsRouter);
+  
+  app.use((req, res, next) => { console.log("Before securityRouter"); next(); });
   app.use("/api", securityRouter);
+  
+  app.use((req, res, next) => { console.log("After all routers mounted"); next(); });
 
   // -- Authentication (Google OAuth ONLY) --
   // Mock Auth Endpoint for E2E Tests
