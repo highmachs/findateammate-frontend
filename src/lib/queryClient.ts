@@ -32,10 +32,10 @@ export const API_BASE_URL: string = "";
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     if (res.status === 503) {
-        // Trigger global maintenance check immediately
-        window.dispatchEvent(new Event("maintenance_503"));
-        // CRITICAL FIX: Throw error for 503 so caller knows request failed
-        throw new Error("Server is under maintenance (503)");
+      // Trigger global maintenance check immediately
+      window.dispatchEvent(new Event("maintenance_503"));
+      // CRITICAL FIX: Throw error for 503 so caller knows request failed
+      throw new Error("Server is under maintenance (503)");
     }
     let message = res.statusText;
     let errorCode: string | undefined;
@@ -44,17 +44,17 @@ async function throwIfResNotOk(res: Response) {
       const body = await res.json();
       message = body.message || body.error || message;
       errorCode = body.code;
-      
+
     } catch (e) {
       // Body is not JSON or empty
     }
-    
+
     // Handle ONBOARDING_REQUIRED error by redirecting to onboarding page
     if (res.status === 403 && errorCode === "ONBOARDING_REQUIRED") {
       window.location.href = "/onboarding";
       throw new Error(message || "Please complete your profile first");
     }
-    
+
     if (res.status === 403) {
       // CSRF token might be invalid or expired
       csrfToken = null;
@@ -71,12 +71,14 @@ async function getCsrfToken(forceRefresh = false) {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort("Request timed out after 30s"), 30000); // 30s timeout
-    
+
     try {
+      console.log('inside getcsrf token start-------')
       const res = await fetch(buildApiUrl("/api/csrf-token"), {
         credentials: "include",
         signal: controller.signal
       });
+      console.log('inside getcsrf token end---------')
       if (res.ok) {
         const data = await res.json();
         csrfToken = data.csrfToken;
@@ -101,12 +103,12 @@ export async function apiRequest(
   data?: unknown | FormData | undefined,
 ): Promise<Response> {
   const headers: Record<string, string> = {};
-  
+
   // Set JSON content-type only if it's not FormData
   if (data && !(data instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
-  
+
   const isMutatingRequest = ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase());
 
   if (isMutatingRequest) {
@@ -117,10 +119,10 @@ export async function apiRequest(
   }
 
   const fullUrl = url.startsWith("http") ? url : buildApiUrl(url);
-  
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort("Request timed out after 30s"), 30000); // 30s timeout
-  
+
   try {
     let res = await fetch(fullUrl, {
       method,
@@ -160,10 +162,10 @@ export const getQueryFn: <T>(options: {
     async ({ queryKey }) => {
       const url = queryKey.join("/") as string;
       const fullUrl = url.startsWith("http") ? url : buildApiUrl(url);
-      
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort("Request timed out after 30s"), 30000); // 30s timeout
-      
+
       try {
         const res = await fetch(fullUrl, {
           credentials: "include",

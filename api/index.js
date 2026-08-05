@@ -3586,7 +3586,9 @@ websocketsRouter.get("/chats/:id/check-participant", async (req, res) => {
 import { Router as Router4 } from "express";
 var securityRouter = Router4();
 securityRouter.get("/csrf-token", (req, res) => {
+  console.log("csrf-token-----start index file")
   const token = generateCsrfToken(req, res, true);
+  console.log("csrf-token-----end index file")
   res.status(200).json({ csrfToken: token });
 });
 
@@ -4076,10 +4078,10 @@ function registerRoutes() {
       logger.log(`File upload initiated: ${req.file.originalname} (${(req.file.size / 1024).toFixed(2)}KB) by user ${req.user.id}`);
       const hex = req.file.buffer.slice(0, 4).toString("hex").toUpperCase();
       const isValid = hex.startsWith("FFD8FF") || // JPEG
-      hex.startsWith("89504E47") || // PNG
-      hex.startsWith("47494638") || // GIF
-      hex.startsWith("52494646") || // WEBP (RIFF container)
-      hex.startsWith("25504446");
+        hex.startsWith("89504E47") || // PNG
+        hex.startsWith("47494638") || // GIF
+        hex.startsWith("52494646") || // WEBP (RIFF container)
+        hex.startsWith("25504446");
       if (!isValid) {
         logger.warn(`Security Block: file ${req.file.originalname} has invalid signature ${hex} (user: ${req.user.id})`);
         return res.status(400).json({ message: "Invalid file content (signature mismatch)" });
@@ -4117,9 +4119,9 @@ function registerRoutes() {
       }
       const hex = req.file.buffer.slice(0, 4).toString("hex").toUpperCase();
       const isValid = hex.startsWith("FFD8FF") || // JPEG
-      hex.startsWith("89504E47") || // PNG
-      hex.startsWith("47494638") || // GIF
-      hex.startsWith("52494646");
+        hex.startsWith("89504E47") || // PNG
+        hex.startsWith("47494638") || // GIF
+        hex.startsWith("52494646");
       if (!isValid) {
         logger.warn(`Avatar security block: invalid signature ${hex} from user ${req.user.id}`);
         return res.status(400).json({ message: "Invalid file content (signature mismatch - avatars must be images)" });
