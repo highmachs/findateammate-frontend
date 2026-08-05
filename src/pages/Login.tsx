@@ -44,14 +44,14 @@ export default function Login() {
                 <CardHeader>
                 <div className="text-center">
                     <Link href="/">
-                        <a className="inline-flex items-center gap-2 mb-8 group">
+                        <div className="inline-flex items-center gap-2 mb-8 group cursor-pointer">
                             <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                                 <Sparkles className="w-5 h-5 text-primary" />
                             </div>
                             <span className="font-display font-bold text-2xl text-foreground">
                                 Find<span className="text-primary">A</span>Teammate
                             </span>
-                        </a>
+                        </div>
                     </Link>
                     <h1 className="text-3xl font-display font-bold text-foreground mb-2">Welcome back</h1>
                     <p className="text-muted-foreground">Sign in using your Google account</p>

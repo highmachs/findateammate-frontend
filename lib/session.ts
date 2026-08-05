@@ -45,7 +45,7 @@ export class TursoSessionStore extends Store {
       console.log('before await withTimeout get')
       const [row] = await withTimeout(
         db.select().from(sessionTable).where(eq(sessionTable.sid, sid)),
-        2000,
+        5000,
         "TursoSessionStore.get"
       );
       console.log('after await withTimeout get')
