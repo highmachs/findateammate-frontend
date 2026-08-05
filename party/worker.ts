@@ -9,8 +9,12 @@ export { Chat, Notifications, Global };
 
 export default {
   async fetch(request: Request, env: Record<string, unknown>) {
-    // partyserver's router matches the URL path to the correct DO class
-    return (await routePartykitRequest(request, env)) || 
-      new Response("Not found", { status: 404 });
+    console.log(`[WebSocket Request] ${request.url}`);
+    console.log(`[Env Keys]`, Object.keys(env));
+    const response = await routePartykitRequest(request, env);
+    if (!response) {
+      console.log(`[Router] No match found for URL. Returning 404.`);
+    }
+    return response || new Response("Not found", { status: 404 });
   },
 };

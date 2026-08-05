@@ -3156,7 +3156,13 @@ var Global = class extends Server {
 // party/worker.ts
 var worker_default = {
   async fetch(request, env3) {
-    return await routePartykitRequest(request, env3) || new Response("Not found", { status: 404 });
+    console.log(`[WebSocket Request] ${request.url}`);
+    console.log(`[Env Keys]`, Object.keys(env3));
+    const response = await routePartykitRequest(request, env3);
+    if (!response) {
+      console.log(`[Router] No match found for URL. Returning 404.`);
+    }
+    return response || new Response("Not found", { status: 404 });
   }
 };
 
