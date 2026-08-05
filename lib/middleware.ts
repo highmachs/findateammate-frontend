@@ -94,7 +94,7 @@ export async function loadUser(req: any): Promise<void> {
       const { password, ...safeUser } = user;
       req.user = safeUser;
       // Fire-and-forget: updateLastActive now uses waitUntil internally to prevent blocking the response
-      storage.updateLastActive(user.id).catch(() => {});
+      storage.updateLastActive(user.id).catch(() => { });
     }
   } catch {
     // silently continue
@@ -140,29 +140,34 @@ export async function bootstrap(req: any, res: any): Promise<boolean> {
       res.setHeader("Set-Cookie", str);
     };
   }
-  
+
   try {
     // CORS
     if (setCorsHeaders(req, res)) return false; // preflight handled
-    
+
     // Cookie parser
+    console.log("Cookieparser----")
     await runMiddleware(req, res, cookieParser());
-    
+
     // Session
+    console.log("sessionMiddleware-----")
     await runMiddleware(req, res, sessionMiddleware);
-    
+
     // Load user from session
     await loadUser(req);
-    
+
     // CSRF Protection
     const isInternal = req.url?.startsWith("/api/internal");
     const isAnalytics = req.url?.startsWith("/api/analytics"); // sendBeacon cannot send CSRF headers
     const hasPartyKitSecret = !!req.headers["x-partykit-secret"];
-    
+
+    console.log("before doubleCsrfProtection")
     if (req.url && req.url.startsWith("/api") && !isInternal && !isAnalytics && !hasPartyKitSecret) {
       await runMiddleware(req, res, _doubleCsrfProtection);
+      console.log("inside doubleCsrfProtection")
     }
-    
+    console.log("after doubleCsrfProtection")
+
     return true; // ready to proceed
   } catch (error: any) {
     // Gracefully handle middleware errors (e.g. CSRF invalid) instead of crashing Vercel function

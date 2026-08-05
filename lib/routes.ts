@@ -1,6 +1,7 @@
 import express from "express";
 import { waitUntil } from "@vercel/functions";
 export const app = express();
+app.set("trust-proxy", 1)
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
 
@@ -109,12 +110,12 @@ async function loadUserFromSession(req: any, _res: any, next: any) {
         // Security: Exclude password from session user object
         const { password, ...safeUser } = user;
         req.user = safeUser as User;
-        
+
         // Track last active time (fire and forget - don't await)
         storage.updateLastActive(user.id);
       } else {
         // User deleted but session exists - destroy session
-        req.session.destroy(() => {});
+        req.session.destroy(() => { });
       }
     } catch (err) {
       logger.error("Session load error", err);
@@ -152,11 +153,11 @@ async function requireOnboarding(req: any, res: any, next: any) {
     university.trim().length > 0 &&
     normalizedDepartment.length > 0 &&
     normalizedDepartment !== "OTHER";
-  
+
   if (!hasCompletedOnboarding) {
-    return res.status(403).json({ 
-      message: "Please complete your profile setup first", 
-      code: "ONBOARDING_REQUIRED" 
+    return res.status(403).json({
+      message: "Please complete your profile setup first",
+      code: "ONBOARDING_REQUIRED"
     });
   }
 
@@ -169,7 +170,7 @@ export function registerRoutes() {
 
 
   // User loading middleware is now handled via bootstrap() in api/_entry.ts
-  
+
   // Maintenance Mode Check
   app.use(maintenanceMiddleware);
 
@@ -211,7 +212,7 @@ export function registerRoutes() {
 
       // Run a query with a promise timeout
       const queryPromise = client.execute("SELECT 1 as val;");
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Database query timed out after 3 seconds")), 3000)
       );
 
@@ -242,7 +243,7 @@ export function registerRoutes() {
     if (process.env.NODE_ENV === "production" && !process.env.ENABLE_MOCK_AUTH) {
       return res.status(404).json({ message: "Not found" });
     }
-    
+
     try {
       const mockUser = await storage.createOAuthUser({
         name: "E2E Test User",
@@ -258,7 +259,7 @@ export function registerRoutes() {
         university: 'Test University',
         skills: ['TypeScript']
       });
-      
+
       req.session.userId = mockUser.id;
       req.session.save((err) => {
         if (err) return next(err);
@@ -352,13 +353,13 @@ export function registerRoutes() {
       // STRICT SECURITY: Only allow onboarding for Google users who are "Unspecified"
       // Prevent manual users or already onboarded users from overwriting via this endpoint
       if (req.user!.authProvider !== 'google' && !req.user!.isAdmin) {
-          return res.status(403).json({ message: "Forbidden: Only Google OAuth users can use onboarding." });
+        return res.status(403).json({ message: "Forbidden: Only Google OAuth users can use onboarding." });
       }
 
       if (req.user!.skills && req.user!.skills.length > 0 && !req.user!.isAdmin) {
-          return res.status(403).json({ message: "Forbidden: You have already completed onboarding." });
+        return res.status(403).json({ message: "Forbidden: You have already completed onboarding." });
       }
-      
+
       const [existingUser] = await db.select().from(users).where(eq(users.username, String(username))).limit(1);
       if (existingUser && existingUser.id !== req.user.id) {
         return res.status(409).json({ message: "Username already taken" });
@@ -433,7 +434,7 @@ export function registerRoutes() {
     try {
       const username = req.query.username; // Verify username uniqueness
       if (typeof username !== 'string') return res.status(400).json({ message: "Invalid username" });
-      
+
       const [existingUser] = await db.select().from(users).where(eq(users.username, username)).limit(1);
       res.json({ available: !existingUser });
     } catch (error) {
@@ -450,47 +451,47 @@ export function registerRoutes() {
 
   app.get("/api/maintenance", async (_req, res, next) => {
     try {
-        const setting = await storage.getSystemSetting('maintenance_mode');
-        // Default to OFF if not set
-        res.json(setting?.value || { enabled: false, mode: "OFF" });
+      const setting = await storage.getSystemSetting('maintenance_mode');
+      // Default to OFF if not set
+      res.json(setting?.value || { enabled: false, mode: "OFF" });
     } catch (error) {
-        next(error);
+      next(error);
     }
   });
 
   app.post("/api/maintenance", requireAuth, requireAdmin, async (req, res, next) => {
     try {
-        const { enabled, mode, message, eta } = req.body;
-        
-        // Validate Mode
-        if (!['OFF', 'PARTIAL', 'FULL'].includes(mode)) {
-            return res.status(400).json({ message: "Invalid mode. Must be OFF, PARTIAL, or FULL" });
-        }
-        
-        const value = { 
-            enabled: mode !== 'OFF', 
-            mode, 
-            message: message || "System is under maintenance.", 
-            eta 
-        };
-        
-        const setting = await storage.setSystemSetting('maintenance_mode', value, req.user!.id);
-        
-        // Audit log
-        await storage.logAudit({
-            action: 'UPDATE_MAINTENANCE',
-            resource: 'SYSTEM',
-            userId: req.user!.id,
-            userName: req.user!.username || req.user!.name,
-            details: { enabled, mode, message, eta }
-        });
+      const { enabled, mode, message, eta } = req.body;
 
-        // Broadcast change via PartyKit HTTP API
-        await emitMaintenance(value);
-        
-        res.json(setting.value);
+      // Validate Mode
+      if (!['OFF', 'PARTIAL', 'FULL'].includes(mode)) {
+        return res.status(400).json({ message: "Invalid mode. Must be OFF, PARTIAL, or FULL" });
+      }
+
+      const value = {
+        enabled: mode !== 'OFF',
+        mode,
+        message: message || "System is under maintenance.",
+        eta
+      };
+
+      const setting = await storage.setSystemSetting('maintenance_mode', value, req.user!.id);
+
+      // Audit log
+      await storage.logAudit({
+        action: 'UPDATE_MAINTENANCE',
+        resource: 'SYSTEM',
+        userId: req.user!.id,
+        userName: req.user!.username || req.user!.name,
+        details: { enabled, mode, message, eta }
+      });
+
+      // Broadcast change via PartyKit HTTP API
+      await emitMaintenance(value);
+
+      res.json(setting.value);
     } catch (error) {
-        next(error);
+      next(error);
     }
   });
 
@@ -579,7 +580,7 @@ export function registerRoutes() {
   // -- File Uploads --
   // Use memoryStorage so files land in req.file.buffer — no temp disk files.
   // Cloudinary handles all persistence; ephemeral Render disk is never touched.
-  
+
   // General file uploads (event posters, etc.) - 5MB limit
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -629,7 +630,7 @@ export function registerRoutes() {
       // Security: Verify Magic Numbers directly from in-memory buffer (no disk I/O needed)
       const hex = req.file.buffer.slice(0, 4).toString('hex').toUpperCase();
       const isValid =
-        hex.startsWith("FFD8FF")   || // JPEG
+        hex.startsWith("FFD8FF") || // JPEG
         hex.startsWith("89504E47") || // PNG
         hex.startsWith("47494638") || // GIF
         hex.startsWith("52494646") || // WEBP (RIFF container)
@@ -686,7 +687,7 @@ export function registerRoutes() {
       // Security: Verify Magic Numbers from in-memory buffer
       const hex = req.file.buffer.slice(0, 4).toString('hex').toUpperCase();
       const isValid =
-        hex.startsWith("FFD8FF")   || // JPEG
+        hex.startsWith("FFD8FF") || // JPEG
         hex.startsWith("89504E47") || // PNG
         hex.startsWith("47494638") || // GIF
         hex.startsWith("52494646");   // WEBP (RIFF) - PDFs NOT allowed for avatars
@@ -731,7 +732,7 @@ export function registerRoutes() {
     try {
       const limitParam = parseInt(req.query.limit as string);
       const limit = Math.min(isNaN(limitParam) ? 20 : limitParam, 100); // Cap limit at 100 to prevent DoS
-      
+
       let cursor: Date | undefined;
       if (req.query.cursor && typeof req.query.cursor === 'string') {
         const parsed = new Date(req.query.cursor);
@@ -761,9 +762,9 @@ export function registerRoutes() {
     try {
       // BUG #18 FIX: Reject event fields sent to teammate endpoint
       if (req.body.eventName || req.body.eventDate) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           message: "Use POST /api/posts/event for events",
-          code: "WRONG_ENDPOINT" 
+          code: "WRONG_ENDPOINT"
         });
       }
 
@@ -801,7 +802,7 @@ export function registerRoutes() {
       // Rate Limit: Teammate Posts (Admins bypass limits)
       if (!user.isAdmin) {
         const twentyFourHoursAgo = new Date(new Date().getTime() - 24 * 60 * 60 * 1000);
-        
+
         const recentCount = await db
           .select({ count: sql<number>`count(*)` })
           .from(posts)
@@ -812,9 +813,9 @@ export function registerRoutes() {
               sql`${posts.eventName} IS NULL`
             )
           );
-        
+
         if (Number(recentCount[0]?.count || 0) >= 1) { // Strict limit: 1 per 24h
-              return res.status(429).json({ message: "You've already created a teammate post in the last 24 hours. To prevent spam, you can only create 1 teammate post per day. Try again tomorrow!" });
+          return res.status(429).json({ message: "You've already created a teammate post in the last 24 hours. To prevent spam, you can only create 1 teammate post per day. Try again tomorrow!" });
         }
       }
 
@@ -883,21 +884,21 @@ export function registerRoutes() {
       // Some clients can send empty strings for optional JSON fields.
       const normalizedAllowedDepartments = Array.isArray(parsed.data.allowedDepartments)
         ? parsed.data.allowedDepartments
-            .filter((dept): dept is string => typeof dept === "string")
-            .map((dept) => dept.trim())
-            .filter((dept) => dept.length > 0)
+          .filter((dept): dept is string => typeof dept === "string")
+          .map((dept) => dept.trim())
+          .filter((dept) => dept.length > 0)
         : null;
       parsed.data.allowedDepartments = normalizedAllowedDepartments as any;
       parsed.data.requiredSkills = Array.isArray(parsed.data.requiredSkills) ? parsed.data.requiredSkills : [];
       parsed.data.requiredInterests = Array.isArray(parsed.data.requiredInterests) ? parsed.data.requiredInterests : [];
-      
+
       // For intra-college organizer events, approval defaults to true
       if (parsed.data.eventType === "intra-college") {
         parsed.data.isEventOrganiser =
           typeof parsed.data.isEventOrganiser === "boolean"
             ? parsed.data.isEventOrganiser
             : false;
-        
+
         // For organizer events, crossDeptRequiresApproval defaults to true UNLESS explicitly set to false
         if (parsed.data.isEventOrganiser) {
           parsed.data.crossDeptRequiresApproval =
@@ -923,27 +924,27 @@ export function registerRoutes() {
 
       // Validate allowedDepartments for intra-college events with specific departments
       if (parsed.data.eventType === "intra-college" && parsed.data.allowedDepartments) {
-  if (!Array.isArray(parsed.data.allowedDepartments)) {
-    return res.status(400).json({ message: "allowedDepartments must be an array" });
-  }
-  if (parsed.data.allowedDepartments.length < 1) {
-    return res.status(400).json({ message: "At least 1 department must be selected when using specific departments" });
-  }
-  if (parsed.data.allowedDepartments.length > 10) {
-    return res.status(400).json({ message: "Maximum 10 departments can be selected" });
-  }
-  // Validate each department value is in the DEPARTMENTS constant
-  for (const dept of parsed.data.allowedDepartments) {
-    if (!DEPARTMENTS.includes(dept as any)) {
-      return res.status(400).json({ message: `Invalid department: ${dept}` });
-    }
-  }
-} else if (parsed.data.eventType !== "intra-college") {
-  // Clear allowedDepartments for non-intra-college events
-  parsed.data.allowedDepartments = null as any;
-}
+        if (!Array.isArray(parsed.data.allowedDepartments)) {
+          return res.status(400).json({ message: "allowedDepartments must be an array" });
+        }
+        if (parsed.data.allowedDepartments.length < 1) {
+          return res.status(400).json({ message: "At least 1 department must be selected when using specific departments" });
+        }
+        if (parsed.data.allowedDepartments.length > 10) {
+          return res.status(400).json({ message: "Maximum 10 departments can be selected" });
+        }
+        // Validate each department value is in the DEPARTMENTS constant
+        for (const dept of parsed.data.allowedDepartments) {
+          if (!DEPARTMENTS.includes(dept as any)) {
+            return res.status(400).json({ message: `Invalid department: ${dept}` });
+          }
+        }
+      } else if (parsed.data.eventType !== "intra-college") {
+        // Clear allowedDepartments for non-intra-college events
+        parsed.data.allowedDepartments = null as any;
+      }
 
-// BUG #9 FIX: Validate eventDate is in the future (check at request time)
+      // BUG #9 FIX: Validate eventDate is in the future (check at request time)
       const eventDate = new Date(parsed.data.eventDate);
       if (isNaN(eventDate.getTime())) {
         return res.status(400).json({ message: "Invalid event date format" });
@@ -955,7 +956,7 @@ export function registerRoutes() {
       // Rate Limit: Event Posts (Admins bypass limits)
       if (!user.isAdmin) {
         const twentyFourHoursAgo = new Date(new Date().getTime() - 24 * 60 * 60 * 1000);
-        
+
         const recentCount = await db
           .select({ count: sql<number>`count(*)` })
           .from(posts)
@@ -966,9 +967,9 @@ export function registerRoutes() {
               not(isNull(posts.eventName))
             )
           );
-        
+
         if (Number(recentCount[0]?.count || 0) >= 10) { // Limit: 10 per 24h
-              return res.status(429).json({ message: "You've reached the event creation limit (10 events per day). This helps us maintain quality. Try again in 24 hours!" });
+          return res.status(429).json({ message: "You've reached the event creation limit (10 events per day). This helps us maintain quality. Try again in 24 hours!" });
         }
       }
 
@@ -1014,9 +1015,9 @@ export function registerRoutes() {
         const rawAllowedDepartments = (parsed.data as any).allowedDepartments;
         parsed.data.allowedDepartments = Array.isArray(rawAllowedDepartments)
           ? rawAllowedDepartments
-              .filter((dept: unknown): dept is string => typeof dept === "string")
-              .map((dept: string) => dept.trim())
-              .filter((dept: string) => dept.length > 0)
+            .filter((dept: unknown): dept is string => typeof dept === "string")
+            .map((dept: string) => dept.trim())
+            .filter((dept: string) => dept.length > 0)
           : (null as any);
       }
 
@@ -1090,12 +1091,12 @@ export function registerRoutes() {
       const postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const post = await storage.getPost(postId);
       if (!post) return res.status(404).json({ message: "Post not found", code: "NOT_FOUND" });
-      
+
       // BUG #5 FIX: Banned users cannot delete posts
       if (req.user!.isBanned && !req.user!.isAdmin) {
         return res.status(403).json({ message: "You have been banned and cannot delete posts", code: "USER_BANNED" });
       }
-      
+
       if (post.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
       }
@@ -1110,16 +1111,16 @@ export function registerRoutes() {
   app.post("/api/posts/:id/upvote", requireAuth, requireOnboarding, voteLimiter, async (req, res, next) => {
     try {
       const postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      
+
       // BUG FIX: Validate that the post is an event before allowing voting
       const post = await storage.getPost(postId);
       if (!post) return res.status(404).json({ message: "Post not found", code: "NOT_FOUND" });
-      
+
       // Only events (with eventName and eventDate) can be voted on
       if (!post.eventName || !post.eventDate) {
         return res.status(400).json({ message: "Cannot vote on teammate posts, only events", code: "INVALID_POST_TYPE" });
       }
-      
+
       await storage.upvoteEvent(postId, req.user!.id);
       res.json({ success: true });
     } catch (error) {
@@ -1130,16 +1131,16 @@ export function registerRoutes() {
   app.post("/api/posts/:id/downvote", requireAuth, requireOnboarding, voteLimiter, async (req, res, next) => {
     try {
       const postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      
+
       // BUG FIX: Validate that the post is an event before allowing voting
       const post = await storage.getPost(postId);
       if (!post) return res.status(404).json({ message: "Post not found", code: "NOT_FOUND" });
-      
+
       // Only events (with eventName and eventDate) can be voted on
       if (!post.eventName || !post.eventDate) {
         return res.status(400).json({ message: "Cannot vote on teammate posts, only events", code: "INVALID_POST_TYPE" });
       }
-      
+
       await storage.downvoteEvent(postId, req.user!.id);
       res.json({ success: true });
     } catch (error) {
@@ -1189,16 +1190,16 @@ export function registerRoutes() {
     try {
       const eventId = Array.isArray(req.params.eventId) ? req.params.eventId[0] : req.params.eventId;
       const event = await storage.getPost(eventId);
-      
+
       if (!event) {
         return res.status(404).json({ message: "Event not found" });
       }
-      
+
       // Check if current user is the organiser or admin
       if (event.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ message: "Forbidden: You are not the organiser of this event" });
       }
-      
+
       // Get registrations
       const registrations = await storage.getEventRegistrations(eventId);
 
@@ -1212,16 +1213,16 @@ export function registerRoutes() {
           ...registration,
           user: registrationUser
             ? {
-                id: registrationUser.id,
-                name: registrationUser.name,
-                email: registrationUser.email,
-                department: registrationUser.department,
-                skills: registrationUser.skills || [],
-                interests: registrationUser.interests || [],
-                avatar: registrationUser.avatar,
-                university: registrationUser.university,
-                city: registrationUser.city,
-              }
+              id: registrationUser.id,
+              name: registrationUser.name,
+              email: registrationUser.email,
+              department: registrationUser.department,
+              skills: registrationUser.skills || [],
+              interests: registrationUser.interests || [],
+              avatar: registrationUser.avatar,
+              university: registrationUser.university,
+              city: registrationUser.city,
+            }
             : null,
         };
       });
@@ -1378,7 +1379,7 @@ export function registerRoutes() {
           notInterestedUsers,
         },
       };
-      
+
       res.json({ event, registrations: enrichedRegistrations, stats, analytics });
     } catch (error) {
       next(error);
@@ -1452,7 +1453,7 @@ export function registerRoutes() {
 
       // Get registrations
       const registrations = await storage.getEventRegistrations(eventId);
-      
+
       // BUG FIX: Batch fetch users instead of N+1 query
       const userIds = [...new Set(registrations.map(r => r.userId))];
       const users = await Promise.all(userIds.map(id => storage.getUser(id)));
@@ -1465,16 +1466,16 @@ export function registerRoutes() {
           ...reg,
           user: user
             ? {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                department: user.department,
-                skills: user.skills || [],
-                interests: user.interests || [],
-                avatar: user.avatar,
-                university: user.university,
-                city: user.city,
-              }
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              department: user.department,
+              skills: user.skills || [],
+              interests: user.interests || [],
+              avatar: user.avatar,
+              university: user.university,
+              city: user.city,
+            }
             : null,
           userName: user?.name || "Unknown",
           userEmail: user?.email || "Unknown",
@@ -1590,7 +1591,7 @@ export function registerRoutes() {
       // BUG #15 FIX: Batch fetch registrations using Map to avoid order dependency
       const eventIds = events.map(e => e.id);
       const allRegistrations = await Promise.all(eventIds.map(id => storage.getEventRegistrations(id)));
-      
+
       const registrationCountMap = new Map();
       allRegistrations.forEach((regs, idx) => {
         registrationCountMap.set(eventIds[idx], regs.length);
@@ -1728,7 +1729,7 @@ export function registerRoutes() {
       }
 
       await storage.updateConnectionRequestStatus(requestId, "rejected");
-      
+
       // Apply negative feedback to preferences (feedback loop)
       const { boostPreferencesFromConnection } = await import("./recommendations");
       waitUntil(
@@ -1736,7 +1737,7 @@ export function registerRoutes() {
           logger.error("Failed to apply feedback from rejection", { error: err })
         )
       );
-      
+
       res.json({ success: true });
     } catch (error) {
       next(error);
@@ -1827,9 +1828,9 @@ export function registerRoutes() {
 
       // SECURITY FIX: Prevent viewing other users' chats
       if (userId !== req.user!.id && !req.user!.isAdmin) {
-          return res.status(403).json({ message: "Forbidden: You can only view your own chats", code: "FORBIDDEN" });
+        return res.status(403).json({ message: "Forbidden: You can only view your own chats", code: "FORBIDDEN" });
       }
-      
+
       const chats = await storage.getChats(userId);
       // BUG #8 FIX NEEDED: Enhance response to include unreadCount for each chat
       // Each chat object should include:
@@ -1856,7 +1857,7 @@ export function registerRoutes() {
         const parsed = new Date(req.query.before as string);
         if (!isNaN(parsed.getTime())) before = parsed;
       }
-      
+
       // BUG #49 FIX: Pass req.user!.id so getMessages() applies the user's fromUserLastCleared /
       // toUserLastCleared cutoff. Passing undefined skipped the clear-history logic entirely,
       // so cleared messages would always reappear after a page refresh.
@@ -1883,13 +1884,13 @@ export function registerRoutes() {
         chatId,
         senderId: req.user!.id
       });
-      
+
       if (!parsed.success) {
         return res.status(400).json(parsed.error);
       }
 
       const message = await storage.createMessage(parsed.data);
-      
+
       // Include sender name in PartyKit message
       const sender = await storage.getUser(req.user!.id);
       const enrichedMessage = {
@@ -1897,7 +1898,7 @@ export function registerRoutes() {
         senderName: sender?.name || "Unknown"
       };
       await emitMessage(chatId, enrichedMessage);
-      
+
       res.json(message);
     } catch (error) {
       logger.error("Error sending message", error);
@@ -1927,19 +1928,19 @@ export function registerRoutes() {
   // Dashboard Aggregate Protocol (DAP)
   app.get("/api/dashboard", requireAuth, async (req, res, next) => {
     try {
-       // Parallelize fetches for performance
-       const [unreadCount, { items: posts, nextCursor }] = await Promise.all([
-         storage.getUnreadNotificationsCount(req.user!.id),
-         storage.getPosts(undefined, 20)
-       ]);
-       
-       res.json({
-         user: req.user,
-         unreadCount,
-         feed: { items: posts, nextCursor }
-       });
+      // Parallelize fetches for performance
+      const [unreadCount, { items: posts, nextCursor }] = await Promise.all([
+        storage.getUnreadNotificationsCount(req.user!.id),
+        storage.getPosts(undefined, 20)
+      ]);
+
+      res.json({
+        user: req.user,
+        unreadCount,
+        feed: { items: posts, nextCursor }
+      });
     } catch (error) {
-       next(error);
+      next(error);
     }
   });
 
@@ -1966,7 +1967,7 @@ export function registerRoutes() {
       const userId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
-      
+
       // Return full user details (excluding password and googleId)
       const { password, googleId, ...fullUser } = user;
       res.json(fullUser);
@@ -1993,14 +1994,14 @@ export function registerRoutes() {
       }
 
       const updated = await storage.promoteUser(userId, isAdmin);
-      
+
       // Audit log
       await storage.logAudit({
-          action: isAdmin ? 'PROMOTE_ADMIN' : 'DEMOTE_ADMIN',
-          resource: 'USER',
-          userId: req.user!.id,
-          userName: req.user!.username || req.user!.name,
-          details: { targetUserId: userId, targetUserName: user.name }
+        action: isAdmin ? 'PROMOTE_ADMIN' : 'DEMOTE_ADMIN',
+        resource: 'USER',
+        userId: req.user!.id,
+        userName: req.user!.username || req.user!.name,
+        details: { targetUserId: userId, targetUserName: user.name }
       });
 
       res.json(updated);
@@ -2018,14 +2019,14 @@ export function registerRoutes() {
       if (!user) return res.status(404).json({ message: "User not found" });
 
       const updated = await storage.promoteOrganiser(userId, isOrganiser);
-      
+
       // Audit log
       await storage.logAudit({
-          action: isOrganiser ? 'PROMOTE_ORGANISER' : 'DEMOTE_ORGANISER',
-          resource: 'USER',
-          userId: req.user!.id,
-          userName: req.user!.username || req.user!.name,
-          details: { targetUserId: userId, targetUserName: user.name }
+        action: isOrganiser ? 'PROMOTE_ORGANISER' : 'DEMOTE_ORGANISER',
+        resource: 'USER',
+        userId: req.user!.id,
+        userName: req.user!.username || req.user!.name,
+        details: { targetUserId: userId, targetUserName: user.name }
       });
 
       res.json(updated);
@@ -2043,7 +2044,7 @@ export function registerRoutes() {
       if (isSuperAdminEmail(user.email)) {
         return res.status(403).json({ message: "Forbidden: Super admin cannot be deleted" });
       }
-      
+
       if (req.user?.id === userId) {
         return res.status(400).json({ message: "You cannot delete yourself." });
       }
@@ -2052,11 +2053,11 @@ export function registerRoutes() {
 
       // Audit log
       await storage.logAudit({
-          action: 'DELETE_USER',
-          resource: 'USER',
-          userId: req.user!.id,
-          userName: req.user!.username || req.user!.name,
-          details: { targetUserId: userId, targetUserName: user.name }
+        action: 'DELETE_USER',
+        resource: 'USER',
+        userId: req.user!.id,
+        userName: req.user!.username || req.user!.name,
+        details: { targetUserId: userId, targetUserName: user.name }
       });
 
       res.sendStatus(200);
@@ -2138,18 +2139,18 @@ export function registerRoutes() {
     try {
       const postId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const post = await storage.getPost(postId);
-      
+
       await storage.adminDeletePost(postId);
 
       // Audit log
       if (post) {
-          await storage.logAudit({
-              action: 'DELETE_POST',
-              resource: 'POST',
-              userId: req.user!.id,
-              userName: req.user!.username || req.user!.name,
-              details: { postId, postTitle: post.title, postAuthorId: post.userId }
-          });
+        await storage.logAudit({
+          action: 'DELETE_POST',
+          resource: 'POST',
+          userId: req.user!.id,
+          userName: req.user!.username || req.user!.name,
+          details: { postId, postTitle: post.title, postAuthorId: post.userId }
+        });
       }
 
       res.sendStatus(200);
@@ -2164,7 +2165,7 @@ export function registerRoutes() {
       const userCountResult = await db.all(sql`SELECT COUNT(*) as count FROM ${users}`);
       const postCountResult = await db.all(sql`SELECT COUNT(*) as count FROM ${posts}`);
       const eventCountResult = await db.all(sql`SELECT COUNT(*) as count FROM ${posts} WHERE ${posts.eventName} IS NOT NULL`);
-      
+
       // Reports Stats
       const reportCountResult = await db.all(sql`SELECT COUNT(*) as count FROM reports`);
       const pendingReportCountResult = await db.all(sql`SELECT COUNT(*) as count FROM reports WHERE status = 'pending'`);
@@ -2177,7 +2178,7 @@ export function registerRoutes() {
         ORDER BY date DESC
         LIMIT 30
       `);
-      
+
       const postsByDate: Record<string, number> = {};
       postsByDateResult.forEach((row: any) => {
         postsByDate[row.date] = Number(row.count);
@@ -2264,36 +2265,36 @@ export function registerRoutes() {
   // Use optionalAuth - silently drop events from unauthenticated users (login page, etc.)
   app.post("/api/analytics", optionalAuth, async (req, res) => {
     try {
-        // Silently ignore analytics from unauthenticated users (e.g. login page)
-        if (!req.user) {
-          return res.status(204).end();
+      // Silently ignore analytics from unauthenticated users (e.g. login page)
+      if (!req.user) {
+        return res.status(204).end();
+      }
+
+      const { insertAnalyticsSchema } = await import("@shared/schema.sqlite");
+
+      // Ensure timestamp is set
+      const data = { ...req.body, timestamp: new Date() };
+
+      const parsed = insertAnalyticsSchema.safeParse(data);
+      if (!parsed.success) return res.status(400).json(parsed.error);
+
+      // Enrich with user info
+      const event = {
+        ...parsed.data,
+        userId: req.user.id,
+        metadata: {
+          ...parsed.data.metadata,
+          userAgent: req.headers['user-agent'],
+          ip: req.ip
         }
+      };
 
-        const { insertAnalyticsSchema } = await import("@shared/schema.sqlite");
-        
-        // Ensure timestamp is set
-        const data = { ...req.body, timestamp: new Date() };
-        
-        const parsed = insertAnalyticsSchema.safeParse(data);
-        if (!parsed.success) return res.status(400).json(parsed.error);
-
-        // Enrich with user info
-        const event = {
-            ...parsed.data,
-            userId: req.user.id,
-            metadata: {
-                ...parsed.data.metadata,
-                userAgent: req.headers['user-agent'],
-                ip: req.ip
-            }
-        };
-
-        await storage.logEvent(event);
-        res.sendStatus(200);
+      await storage.logEvent(event);
+      res.sendStatus(200);
     } catch (error) {
-        // Analytics should fail silently to not impact user experience
-        console.error("Analytics logging failed:", error);
-        res.sendStatus(200);
+      // Analytics should fail silently to not impact user experience
+      console.error("Analytics logging failed:", error);
+      res.sendStatus(200);
     }
   });
 
@@ -2303,7 +2304,7 @@ export function registerRoutes() {
   app.post("/api/interactions", requireAuth, async (req, res) => {
     try {
       const { postId, interactionType, durationSeconds, metadata } = req.body;
-      
+
       if (!postId || !interactionType) {
         return res.status(400).json({ message: "postId and interactionType are required" });
       }
@@ -2338,7 +2339,7 @@ export function registerRoutes() {
       }
 
       const { query, filters, resultsCount, clickedPostIds } = parsed.data;
-      
+
       await storage.trackUserSearch(
         req.user!.id,
         query,
@@ -2364,7 +2365,7 @@ export function registerRoutes() {
       const { getRecommendationBucket } = await import("./recommendations");
       const recommendedIds = await storage.getRecommendedPostIds(req.user!.id, limit);
       const bucket = getRecommendationBucket(req.user!.id);
-      
+
       res.json({ postIds: recommendedIds, bucket });
     } catch (error) {
       next(error);
@@ -2414,7 +2415,7 @@ export function registerRoutes() {
       const limit = Math.min(isNaN(limitParam) ? 5 : limitParam, 10);
 
       const suggestions = await storage.getSearchSuggestions(req.user!.id, limit);
-      
+
       res.json({ suggestions });
     } catch (error) {
       next(error);
@@ -2425,7 +2426,7 @@ export function registerRoutes() {
     try {
       const { insertAuditLogSchema } = await import("@shared/schema.sqlite");
       const parsed = insertAuditLogSchema.safeParse(req.body);
-      
+
       if (!parsed.success) {
         return res.status(400).json(parsed.error);
       }
@@ -2435,7 +2436,7 @@ export function registerRoutes() {
         userId: req.user?.id || null,
         userName: req.user?.username || req.user?.name || "System"
       });
-      
+
       res.json({ success: true });
     } catch (error) {
       console.error("Failed to log audit event:", error);
@@ -2450,18 +2451,18 @@ export function registerRoutes() {
         limitParam && !isNaN(Number(limitParam)) ? Number(limitParam) : 100,
         500
       ); // Cap at 500
-      
+
       const startDateParam = req.query.startDate;
       const endDateParam = req.query.endDate;
-      
+
       let startDate: Date | undefined;
       let endDate: Date | undefined;
-      
+
       if (startDateParam && typeof startDateParam === 'string') {
         const parsed = new Date(startDateParam);
         if (!isNaN(parsed.getTime())) startDate = parsed;
       }
-      
+
       if (endDateParam && typeof endDateParam === 'string') {
         const parsed = new Date(endDateParam);
         if (!isNaN(parsed.getTime())) endDate = parsed;
@@ -2478,22 +2479,22 @@ export function registerRoutes() {
     try {
       const startDateParam = req.query.startDate;
       const endDateParam = req.query.endDate;
-      
+
       let startDate: Date | undefined;
       let endDate: Date | undefined;
-      
+
       if (startDateParam && typeof startDateParam === 'string') {
         const parsed = new Date(startDateParam);
         if (!isNaN(parsed.getTime())) startDate = parsed;
       }
-      
+
       if (endDateParam && typeof endDateParam === 'string') {
         const parsed = new Date(endDateParam);
         if (!isNaN(parsed.getTime())) endDate = parsed;
       }
 
       const logs = await storage.getAuditLogs(10000, startDate, endDate);
-      
+
       const csv = [
         'ID,Timestamp,Action,Resource,User ID,Username,Details',
         ...logs.map((l: AuditLog) => {
@@ -2517,15 +2518,15 @@ export function registerRoutes() {
     try {
       const startDateParam = req.query.startDate;
       const endDateParam = req.query.endDate;
-      
+
       let startDate: Date | undefined;
       let endDate: Date | undefined;
-      
+
       if (startDateParam && typeof startDateParam === 'string') {
         const parsed = new Date(startDateParam);
         if (!isNaN(parsed.getTime())) startDate = parsed;
       }
-      
+
       if (endDateParam && typeof endDateParam === 'string') {
         const parsed = new Date(endDateParam);
         if (!isNaN(parsed.getTime())) endDate = parsed;
@@ -2536,7 +2537,7 @@ export function registerRoutes() {
       const start = startDate || new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       const logs = await storage.getAuditLogs(10000, start, end);
-      
+
       const csv = [
         'ID,Timestamp,Action,Resource,User ID,Username,Details',
         ...logs.map((l: AuditLog) => {
@@ -2628,7 +2629,7 @@ export function registerRoutes() {
     try {
       const { insertReportSchema } = await import("@shared/schema.sqlite");
       const parsed = insertReportSchema.safeParse(req.body);
-      
+
       if (!parsed.success) {
         return res.status(400).json(parsed.error);
       }
@@ -2644,17 +2645,17 @@ export function registerRoutes() {
         reporterId: req.user!.id,
         reporterEmail: req.user!.email
       });
-      
+
       // Notify Admin via Email
       try {
         const { mailProvider } = await import("./mail");
         const username = req.user!.username || req.user!.name;
         // Schema uses 'description', not 'reason'. 'targetId' is likely reportedUserId or reportedPostId.
         const target = parsed.data.pageSection || "General";
-        
+
         // FIX BUG #2: Await admin email notification
         await mailProvider.send({
-          to: process.env.SMTP_USER || "FindATeammate@findateammate.online", 
+          to: process.env.SMTP_USER || "FindATeammate@findateammate.online",
           subject: `🚨 New Report: ${parsed.data.type} - ${parsed.data.subject}`,
           text: `New Report from ${req.user!.name} (@${username})\n\nType: ${parsed.data.type}\nContext: ${target}\nDescription: ${parsed.data.description}\n\nCheck Admin Dashboard for details.`,
           html: `
@@ -2672,59 +2673,59 @@ export function registerRoutes() {
           `
         });
       } catch (err) {
-         logger.error("Failed to send admin report email", err);
-         // Continue - report is created even if notification fails
+        logger.error("Failed to send admin report email", err);
+        // Continue - report is created even if notification fails
       }
 
       res.status(201).json(report);
     } catch (error) {
-        next(error);
+      next(error);
     }
   });
 
   app.get("/api/admin/reports", requireAdmin, async (req, res, next) => {
     try {
-        const { status, type, search } = req.query;
-        const reports = await storage.getReports(status as string, type as string, search as string);
-        res.json(reports);
+      const { status, type, search } = req.query;
+      const reports = await storage.getReports(status as string, type as string, search as string);
+      res.json(reports);
     } catch (error) {
-        next(error);
+      next(error);
     }
   });
 
   app.patch("/api/admin/reports/:id", requireAdmin, async (req, res, next) => {
     try {
-        const reportId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-        const { status, adminNotes } = req.body;
-        
-        if (!['pending', 'resolved', 'dismissed'].includes(status)) {
-            return res.status(400).json({ message: "Invalid status" });
+      const reportId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const { status, adminNotes } = req.body;
+
+      if (!['pending', 'resolved', 'dismissed'].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+
+      const report = await storage.updateReportStatus(reportId, status, req.user!.id, adminNotes);
+
+      // Audit log
+      await storage.logAudit({
+        action: 'UPDATE_REPORT',
+        resource: 'REPORT',
+        userId: req.user!.id,
+        userName: req.user!.username || req.user!.name,
+        details: { reportId, status, adminNotes }
+      });
+
+      // FIX BUG #2: Await resolution email
+      const { sendResolutionEmail } = await import("./mail");
+      try {
+        if (report && status === "resolved" && report.reporterEmail) {
+          await sendResolutionEmail(report.reporterEmail, Number(report.id), adminNotes || "No specific notes provided.");
         }
-
-        const report = await storage.updateReportStatus(reportId, status, req.user!.id, adminNotes);
-
-        // Audit log
-        await storage.logAudit({
-            action: 'UPDATE_REPORT',
-            resource: 'REPORT',
-            userId: req.user!.id,
-            userName: req.user!.username || req.user!.name,
-            details: { reportId, status, adminNotes }
-        });
-
-        // FIX BUG #2: Await resolution email
-        const { sendResolutionEmail } = await import("./mail");
-        try {
-          if (report && status === "resolved" && report.reporterEmail) {
-            await sendResolutionEmail(report.reporterEmail, Number(report.id), adminNotes || "No specific notes provided.");
-          }
-        } catch (emailErr) {
-          logger.error("Failed to send resolution email", emailErr);
-          // Continue - report status is updated even if email fails
-        }
-        res.json(report);
+      } catch (emailErr) {
+        logger.error("Failed to send resolution email", emailErr);
+        // Continue - report status is updated even if email fails
+      }
+      res.json(report);
     } catch (error) {
-        next(error);
+      next(error);
     }
   });
 
@@ -2744,11 +2745,11 @@ export function registerRoutes() {
       // Audit log
       const idList = ids && typeof ids === 'string' ? ids.split(',').filter(Boolean) : [];
       await storage.logAudit({
-          action: 'DELETE_REPORTS',
-          resource: 'REPORT',
-          userId: req.user!.id,
-          userName: req.user!.username || req.user!.name,
-          details: { all, count: all ? 'ALL' : idList.length }
+        action: 'DELETE_REPORTS',
+        resource: 'REPORT',
+        userId: req.user!.id,
+        userName: req.user!.username || req.user!.name,
+        details: { all, count: all ? 'ALL' : idList.length }
       });
 
       res.json({ success: true });
@@ -2798,7 +2799,7 @@ export function registerRoutes() {
         ...parsed.data,
         userId: req.user!.id
       });
-      
+
       res.status(201).json(feedbackEntry);
     } catch (error) {
       next(error);
@@ -2811,9 +2812,9 @@ export function registerRoutes() {
   app.delete("/api/users/me", requireAuth, async (req, res, next) => {
     try {
       const userId = req.user!.id;
-      
+
       await storage.deleteUser(userId);
-      
+
       // BUG #28 FIX: req.logout() only clears Passport's req.user. For manually-logged-in
       // users (req.session.userId), the session record survives on the server and the
       // connect.sid cookie stays in the browser, keeping them "authenticated" against a
@@ -2839,12 +2840,12 @@ export function registerRoutes() {
 
   app.get("/api/admin/feedback", requireAdmin, async (req, res, next) => {
     try {
-        const limitParam = req.query.limit ? Number(req.query.limit) : 50;
-        const limit = isNaN(limitParam) ? 50 : Math.min(limitParam, 500);
-        const feedback = await storage.getFeedback(limit);
-        res.json(feedback);
+      const limitParam = req.query.limit ? Number(req.query.limit) : 50;
+      const limit = isNaN(limitParam) ? 50 : Math.min(limitParam, 500);
+      const feedback = await storage.getFeedback(limit);
+      res.json(feedback);
     } catch (error) {
-        next(error);
+      next(error);
     }
   });
 
@@ -2855,15 +2856,15 @@ export function registerRoutes() {
     try {
       const startDateParam = req.query.startDate;
       const endDateParam = req.query.endDate;
-      
+
       let startDate: Date | undefined;
       let endDate: Date | undefined;
-      
+
       if (startDateParam && typeof startDateParam === 'string') {
         const parsed = new Date(startDateParam);
         if (!isNaN(parsed.getTime())) startDate = parsed;
       }
-      
+
       if (endDateParam && typeof endDateParam === 'string') {
         const parsed = new Date(endDateParam);
         if (!isNaN(parsed.getTime())) endDate = parsed;
@@ -2876,7 +2877,7 @@ export function registerRoutes() {
       const whereConditions = [];
       if (startDate) whereConditions.push(sql`${analytics.timestamp} >= ${startDate}`);
       if (endDate) whereConditions.push(sql`${analytics.timestamp} <= ${endDate}`);
-      
+
       let featureUsageResult;
       if (whereConditions.length > 0) {
         featureUsageResult = await db.all(sql`
@@ -2894,7 +2895,7 @@ export function registerRoutes() {
           ORDER BY usage DESC
         `);
       }
-      
+
       const featureUsage = featureUsageResult.map((row: any) => ({
         feature: row.feature,
         usage: Number(row.usage)
@@ -2986,7 +2987,7 @@ export function registerRoutes() {
         featureUsage,
         userFeedback: await storage.getFeedback(10)
       };
-      
+
       res.json(analyticsData);
     } catch (error) {
       next(error);
@@ -3008,15 +3009,15 @@ export function registerRoutes() {
     try {
       const startDateParam = req.query.startDate;
       const endDateParam = req.query.endDate;
-      
+
       let startDate: Date | undefined;
       let endDate: Date | undefined;
-      
+
       if (startDateParam && typeof startDateParam === 'string') {
         const parsed = new Date(startDateParam);
         if (!isNaN(parsed.getTime())) startDate = parsed;
       }
-      
+
       if (endDateParam && typeof endDateParam === 'string') {
         const parsed = new Date(endDateParam);
         if (!isNaN(parsed.getTime())) endDate = parsed;
@@ -3024,7 +3025,7 @@ export function registerRoutes() {
 
       // Export needs more data, set high limit
       const events = await storage.getAnalytics(startDate, endDate, 10000);
-      
+
       const csv = [
         'ID,Timestamp,Event,Page,User ID,Metadata',
         ...events.map((e: Analytics) => {
@@ -3090,8 +3091,8 @@ export function registerRoutes() {
       await db.all(sql`SELECT 1`);
       res.json({ status: "ok", timestamp: new Date().toISOString(), db: "connected" });
     } catch (error) {
-       logger.error("Health check failed", error);
-       res.status(503).json({ status: "error", message: "Database connection failed" });
+      logger.error("Health check failed", error);
+      res.status(503).json({ status: "error", message: "Database connection failed" });
     }
   });
 
@@ -3122,30 +3123,30 @@ export function registerRoutes() {
   app.use((err: any, req: any, res: any, next: any) => {
     if (err instanceof multer.MulterError) {
       logger.warn(`Multer error: ${err.code} on ${req.path} by user ${req.user?.id || 'anonymous'}`);
-      
+
       if (err.code === 'LIMIT_FILE_SIZE') {
         // Differentiate between avatar (2MB) and general file (5MB) uploads
         const isAvatarUpload = req.path.includes('/avatar');
         const limit = isAvatarUpload ? '2MB' : '5MB';
-        return res.status(413).json({ 
-          message: `File too large. Maximum size is ${limit}`, 
-          code: 'FILE_TOO_LARGE' 
+        return res.status(413).json({
+          message: `File too large. Maximum size is ${limit}`,
+          code: 'FILE_TOO_LARGE'
         });
       }
-      
+
       if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-        return res.status(400).json({ 
-          message: "Unexpected file field", 
-          code: 'INVALID_FILE_FIELD' 
+        return res.status(400).json({
+          message: "Unexpected file field",
+          code: 'INVALID_FILE_FIELD'
         });
       }
-      
-      return res.status(400).json({ 
-        message: err.message || "File upload error", 
-        code: 'UPLOAD_ERROR' 
-        });
+
+      return res.status(400).json({
+        message: err.message || "File upload error",
+        code: 'UPLOAD_ERROR'
+      });
     }
-    
+
     // If not a multer error, pass to global error handler
     next(err);
   });
@@ -3155,7 +3156,7 @@ export function registerRoutes() {
   app.use((err: any, req: any, res: any, _next: any) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-  logger.error(`Unhandled error on ${req.path}`, err);
+    logger.error(`Unhandled error on ${req.path}`, err);
 
     res.status(status).json({ message });
   });

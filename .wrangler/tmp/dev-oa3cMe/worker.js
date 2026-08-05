@@ -2978,7 +2978,7 @@ var Chat = class extends Server {
       console.warn("[ChatRoom] Could not verify participant on first try, retrying in case of cold start:", err);
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2e3);
+        const timeout = setTimeout(() => controller.abort("Auth fetch retry timed out"), 2e3);
         const retryRes = await fetch(`${apiUrl}/api/chats/${chatId}/check-participant`, {
           headers: {
             "x-partykit-secret": this.env.PARTYKIT_SECRET,
