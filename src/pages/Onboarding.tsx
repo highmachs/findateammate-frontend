@@ -207,6 +207,34 @@ export default function Onboarding() {
     }
   }, [user, isLoading]);
 
+  // FIX ISSUE #2: Prevent back button navigation during onboarding
+  useEffect(() => {
+    // Push initial state to history
+    window.history.pushState(null, "", window.location.href);
+
+    const handlePopState = (e: PopStateEvent) => {
+      e.preventDefault();
+      window.history.pushState(null, "", window.location.href);
+      alert("Please complete your profile setup first before leaving this page");
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  // Load saved draft from localStorage on mount
+  useEffect(() => {
+    const savedDraft = loadSavedDraft();
+    if (Object.keys(savedDraft).length > 0) {
+      Object.keys(savedDraft).forEach((key) => {
+        form.setValue(key as keyof OnboardingForm, savedDraft[key as keyof OnboardingForm], { shouldValidate: true });
+      });
+    }
+  }, [form]);
+
   // Show loading state while checking user status
   if (isLoading || !user) {
     return (
@@ -236,34 +264,6 @@ export default function Onboarding() {
       </div>
     );
   }
-
-  // FIX ISSUE #2: Prevent back button navigation during onboarding
-  useEffect(() => {
-    // Push initial state to history
-    window.history.pushState(null, "", window.location.href);
-
-    const handlePopState = (e: PopStateEvent) => {
-      e.preventDefault();
-      window.history.pushState(null, "", window.location.href);
-      alert("Please complete your profile setup first before leaving this page");
-    };
-
-    window.addEventListener("popstate", handlePopState);
-
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-    };
-  }, []);
-
-  // Load saved draft from localStorage on mount
-  useEffect(() => {
-    const savedDraft = loadSavedDraft();
-    if (Object.keys(savedDraft).length > 0) {
-      Object.keys(savedDraft).forEach((key) => {
-        form.setValue(key as keyof OnboardingForm, savedDraft[key as keyof OnboardingForm], { shouldValidate: true });
-      });
-    }
-  }, [form]);
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-background p-4 relative overflow-hidden py-12">
