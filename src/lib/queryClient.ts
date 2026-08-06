@@ -103,55 +103,37 @@ export async function apiRequest(
   data?: unknown | FormData | undefined,
 ): Promise<Response> {
   const headers: Record<string, string> = {};
-
-  // Set JSON content-type only if it's not FormData
   if (data && !(data instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
-
   const isMutatingRequest = ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase());
-
   if (isMutatingRequest) {
     const token = await getCsrfToken();
-    if (token) {
-      headers["x-csrf-token"] = token;
-    }
+    if (token) headers["x-csrf-token"] = token;
   }
-
   const fullUrl = url.startsWith("http") ? url : buildApiUrl(url);
+  const body = data instanceof FormData ? data : (data ? JSON.stringify(data) : undefined);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort("Request timed out after 30s"), 30000); // 30s timeout
-
-  try {
-    let res = await fetch(fullUrl, {
-      method,
-      headers,
-      body: data instanceof FormData ? data : (data ? JSON.stringify(data) : undefined),
-      credentials: "include",
-      signal: controller.signal,
-    });
-
-    // If CSRF token expired, refresh and retry once transparently.
-    if (isMutatingRequest && res.status === 403) {
-      const refreshedToken = await getCsrfToken(true);
-      if (refreshedToken) {
-        headers["x-csrf-token"] = refreshedToken;
-        res = await fetch(fullUrl, {
-          method,
-          headers,
-          body: data instanceof FormData ? data : (data ? JSON.stringify(data) : undefined),
-          credentials: "include",
-          signal: controller.signal,
-        });
-      }
+  async function attempt(): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+      return await fetch(fullUrl, { method, headers, body, credentials: "include", signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    await throwIfResNotOk(res);
-    return res;
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  let res = await attempt();
+  if (isMutatingRequest && res.status === 403) {
+    const refreshedToken = await getCsrfToken(true);
+    if (refreshedToken) {
+      headers["x-csrf-token"] = refreshedToken;
+      res = await attempt(); // fresh controller + full 30s budget
+    }
+  }
+  await throwIfResNotOk(res);
+  return res;
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
