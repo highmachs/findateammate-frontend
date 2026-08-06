@@ -1,12 +1,22 @@
-import { Server, type Connection, type ConnectionContext } from "partyserver";
+import type * as Party from "partykit/server";
 import { verifyWsToken } from "./lib/auth";
 
 // Each instance = one chat room (room name = chatId)
-export class Chat extends Server {
-  declare env: Record<string, unknown>;
+export default class Chat implements Party.Server {
+  env: Record<string, unknown>;
+  name: string;
   private connectionUsers = new Map<string, string>();
 
-  async onConnect(conn: Connection, ctx: ConnectionContext) {
+  constructor(public room: Party.Room) {
+    this.env = room.env as Record<string, unknown>;
+    this.name = room.id;
+  }
+
+  broadcast(msg: string) {
+    this.room.broadcast(msg);
+  }
+
+  async onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");
 
@@ -79,7 +89,7 @@ export class Chat extends Server {
     console.log(`[ChatRoom] User ${userId} joined room ${chatId}`);
   }
 
-  async onMessage(conn: Connection, message: string) {
+  async onMessage(message: string | ArrayBuffer, conn: Party.Connection) {
     const userId = this.connectionUsers.get(conn.id);
     if (!userId) {
       conn.send(JSON.stringify({ type: "error", message: "Not authenticated" }));
@@ -88,7 +98,7 @@ export class Chat extends Server {
 
     let data: any;
     try {
-      data = JSON.parse(message);
+      data = JSON.parse(message as string);
     } catch {
       conn.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
       return;
@@ -127,13 +137,13 @@ export class Chat extends Server {
     }
   }
 
-  onClose(conn: Connection) {
+  onClose(conn: Party.Connection) {
     const userId = this.connectionUsers.get(conn.id);
     this.connectionUsers.delete(conn.id);
     console.log(`[ChatRoom] Connection ${conn.id} (user ${userId}) closed`);
   }
 
-  onError(conn: Connection, err: unknown) {
+  onError(conn: Party.Connection, err: unknown) {
     console.error(`[ChatRoom] Error on ${conn.id}:`, err);
     this.connectionUsers.delete(conn.id);
   }
@@ -141,7 +151,7 @@ export class Chat extends Server {
   // HTTP endpoint: Vercel API posts messages here for broadcast
   async onRequest(request: Request): Promise<Response> {
     const secret = request.headers.get("x-partykit-secret");
-    if (secret !== ((this as any).env.PARTYKIT_SECRET as string)) {
+    if (secret !== (this.env.PARTYKIT_SECRET as string)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
     }
     const body = await request.json() as any;

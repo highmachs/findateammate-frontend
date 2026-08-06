@@ -1,11 +1,20 @@
-import { Server, type Connection, type ConnectionContext } from "partyserver";
+import type * as Party from "partykit/server";
 import { verifyWsToken } from "./lib/auth";
 
-export class Global extends Server {
-  declare env: Record<string, unknown>;
-  declare ctx: any;
+export default class Global implements Party.Server {
+  env: Record<string, unknown>;
+  ctx: Party.Room;
 
-  async onConnect(conn: Connection, ctx: ConnectionContext) {
+  constructor(public room: Party.Room) {
+    this.env = room.env as Record<string, unknown>;
+    this.ctx = room;
+  }
+
+  broadcast(msg: string) {
+    this.room.broadcast(msg);
+  }
+
+  async onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");
 
@@ -39,7 +48,7 @@ export class Global extends Server {
 
   onMessage() {}
   onClose() {}
-  onError(conn: Connection, err: unknown) {
+  onError(conn: Party.Connection, err: unknown) {
     console.error("[GlobalRoom] Error:", err);
   }
 }

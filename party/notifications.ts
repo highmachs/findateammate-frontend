@@ -1,10 +1,20 @@
-import { Server, type Connection, type ConnectionContext } from "partyserver";
+import type * as Party from "partykit/server";
 import { verifyWsToken } from "./lib/auth";
 
-export class Notifications extends Server {
-  declare env: Record<string, unknown>;
+export default class Notifications implements Party.Server {
+  env: Record<string, unknown>;
+  name: string;
 
-  async onConnect(conn: Connection, ctx: ConnectionContext) {
+  constructor(public room: Party.Room) {
+    this.env = room.env as Record<string, unknown>;
+    this.name = room.id;
+  }
+
+  broadcast(msg: string) {
+    this.room.broadcast(msg);
+  }
+
+  async onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");
 
@@ -38,7 +48,7 @@ export class Notifications extends Server {
   // Vercel API calls this room's HTTP endpoint to push events to the user
   async onRequest(request: Request): Promise<Response> {
     const secret = request.headers.get("x-partykit-secret");
-    if (secret !== ((this as any).env.PARTYKIT_SECRET as string)) {
+    if (secret !== (this.env.PARTYKIT_SECRET as string)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
     }
 
@@ -49,7 +59,7 @@ export class Notifications extends Server {
 
   onMessage() {}
   onClose() {}
-  onError(conn: Connection, err: unknown) {
+  onError(conn: Party.Connection, err: unknown) {
     console.error("[NotificationRoom] Error:", err);
   }
 }

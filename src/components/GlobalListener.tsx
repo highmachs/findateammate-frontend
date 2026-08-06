@@ -172,6 +172,8 @@ export function GlobalListener() {
     
     useEffect(() => {
         const handleSocketOffline = (event: Event) => {
+            // Disabled temporarily due to PartyKit global limits
+            /*
             const customEvent = event as CustomEvent;
             toast({
                 title: "Connection Lost",
@@ -179,6 +181,7 @@ export function GlobalListener() {
                 variant: "destructive",
                 duration: 10000,
             });
+            */
         };
         
         window.addEventListener("socket_offline", handleSocketOffline);
