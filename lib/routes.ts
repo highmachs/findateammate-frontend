@@ -305,10 +305,14 @@ export function registerRoutes() {
     }
     // 2. Manual Session Fallback
     if (req.session.userId) {
-      const user = await storage.getUser(req.session.userId);
-      if (user) {
-        const { password, ...safeUser } = user;
-        return res.json(safeUser);
+      try {
+        const user = await storage.getUser(req.session.userId);
+        if (user) {
+          const { password, ...safeUser } = user;
+          return res.json(safeUser);
+        }
+      } catch (error) {
+        console.error("Failed to fetch user in /api/me:", error);
       }
     }
     // Anonymous sessions are a valid state for this probe endpoint.
@@ -454,13 +458,15 @@ export function registerRoutes() {
     res.json({ status: "ok", timestamp: new Date() });
   });
 
-  app.get("/api/maintenance", async (_req, res, next) => {
+  app.get("/api/maintenance", async (_req, res) => {
     try {
       const setting = await storage.getSystemSetting('maintenance_mode');
       // Default to OFF if not set
       res.json(setting?.value || { enabled: false, mode: "OFF" });
     } catch (error) {
-      next(error);
+      // Fail gracefully if DB hangs
+      console.error("Failed to fetch maintenance status:", error);
+      res.json({ enabled: false, mode: "OFF" });
     }
   });
 

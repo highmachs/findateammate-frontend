@@ -2992,7 +2992,7 @@ var TursoSessionStore = class extends Store {
       cb?.();
     } catch (err) {
       console.error("TursoSessionStore.set error:", err);
-      cb?.(err);
+      cb?.();
     }
   }
   async destroy(sid, cb) {
@@ -3008,7 +3008,7 @@ var TursoSessionStore = class extends Store {
       cb?.();
     } catch (err) {
       console.error("TursoSessionStore.destroy error:", err);
-      cb?.(err);
+      cb?.();
     }
   }
   async touch(sid, sess, cb) {
@@ -3031,7 +3031,7 @@ var TursoSessionStore = class extends Store {
       cb?.();
     } catch (err) {
       console.error("TursoSessionStore.touch error:", err);
-      cb?.(err);
+      cb?.();
     }
   }
   /** Called by the daily cron job, NOT by setInterval. */
@@ -3941,10 +3941,14 @@ function registerRoutes() {
       return res.json(req.user);
     }
     if (req.session.userId) {
-      const user = await storage.getUser(req.session.userId);
-      if (user) {
-        const { password, ...safeUser } = user;
-        return res.json(safeUser);
+      try {
+        const user = await storage.getUser(req.session.userId);
+        if (user) {
+          const { password, ...safeUser } = user;
+          return res.json(safeUser);
+        }
+      } catch (error) {
+        console.error("Failed to fetch user in /api/me:", error);
       }
     }
     res.json(null);
@@ -4056,12 +4060,13 @@ function registerRoutes() {
   app.get("/api/status", (_req, res) => {
     res.json({ status: "ok", timestamp: /* @__PURE__ */ new Date() });
   });
-  app.get("/api/maintenance", async (_req, res, next) => {
+  app.get("/api/maintenance", async (_req, res) => {
     try {
       const setting = await storage.getSystemSetting("maintenance_mode");
       res.json(setting?.value || { enabled: false, mode: "OFF" });
     } catch (error) {
-      next(error);
+      console.error("Failed to fetch maintenance status:", error);
+      res.json({ enabled: false, mode: "OFF" });
     }
   });
   app.post("/api/maintenance", requireAuth, requireAdmin, async (req, res, next) => {

@@ -78,7 +78,7 @@ export class TursoSessionStore extends Store {
       cb?.();
     } catch (err) {
       console.error("TursoSessionStore.set error:", err);
-      cb?.(err);
+      cb?.();
     }
   }
 
@@ -95,7 +95,7 @@ export class TursoSessionStore extends Store {
       cb?.();
     } catch (err) {
       console.error("TursoSessionStore.destroy error:", err);
-      cb?.(err);
+      cb?.();
     }
   }
 
@@ -123,7 +123,7 @@ export class TursoSessionStore extends Store {
       cb?.();
     } catch (err) {
       console.error("TursoSessionStore.touch error:", err);
-      cb?.(err);
+      cb?.();
     }
   }
 
