@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { API_BASE_URL } from "@/lib/queryClient";
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, startTransition } from "react";
 
 export default function Register() {
     const { user, isLoading } = useAuth();
@@ -13,7 +13,9 @@ export default function Register() {
     // FIX: Use useEffect to prevent redirect during render
     useEffect(() => {
         if (user) {
-            setLocation("/");
+            startTransition(() => {
+                setLocation("/");
+            });
         }
     }, [user, setLocation]);
 

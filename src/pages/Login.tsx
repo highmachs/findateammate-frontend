@@ -3,7 +3,7 @@ import { useLocation, Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card";
 import { ArrowLeft, Sparkles, Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, startTransition } from "react";
 import { API_BASE_URL } from "@/lib/queryClient";
 
 export default function Login() {
@@ -13,7 +13,9 @@ export default function Login() {
     // FIX #1: Use useEffect to prevent redirect during render
     useEffect(() => {
         if (user) {
-            setLocation("/teammates");
+            startTransition(() => {
+                setLocation("/teammates");
+            });
         }
     }, [user, setLocation]);
 

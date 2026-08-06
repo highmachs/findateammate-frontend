@@ -3,7 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
-import { useEffect, useState } from "react";
+import { useEffect, useState, startTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -167,7 +167,9 @@ export default function Onboarding() {
         title: "Welcome aboard!",
         description: "Your profile has been successfully set up.",
       });
-      setLocation("/");
+      startTransition(() => {
+        setLocation("/");
+      });
     },
     onError: (error: any) => {
       toast({
@@ -183,7 +185,9 @@ export default function Onboarding() {
     if (isLoading) return; // Wait for user data to load
 
     if (!user) {
-      setLocation("/login");
+      startTransition(() => {
+        setLocation("/login");
+      });
       return;
     }
 
@@ -197,12 +201,16 @@ export default function Onboarding() {
     const needsOnboarding = !(hasSkills && hasCity && hasUniversity && hasDepartment);
     
     if (!isGoogleUser && !user.isAdmin) {
-      setLocation("/");
+      startTransition(() => {
+        setLocation("/");
+      });
       return;
     }
 
     if (!needsOnboarding && !user.isAdmin) {
-      setLocation("/");
+      startTransition(() => {
+        setLocation("/");
+      });
       return;
     }
   }, [user, isLoading, setLocation]);
