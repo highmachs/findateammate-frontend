@@ -167,9 +167,7 @@ export default function Onboarding() {
         title: "Welcome aboard!",
         description: "Your profile has been successfully set up.",
       });
-      startTransition(() => {
-        setLocation("/");
-      });
+      window.location.href = "/";
     },
     onError: (error: any) => {
       toast({
@@ -185,9 +183,7 @@ export default function Onboarding() {
     if (isLoading) return; // Wait for user data to load
 
     if (!user) {
-      startTransition(() => {
-        setLocation("/login");
-      });
+      window.location.href = "/login";
       return;
     }
 
@@ -201,19 +197,15 @@ export default function Onboarding() {
     const needsOnboarding = !(hasSkills && hasCity && hasUniversity && hasDepartment);
     
     if (!isGoogleUser && !user.isAdmin) {
-      startTransition(() => {
-        setLocation("/");
-      });
+      window.location.href = "/";
       return;
     }
 
     if (!needsOnboarding && !user.isAdmin) {
-      startTransition(() => {
-        setLocation("/");
-      });
+      window.location.href = "/";
       return;
     }
-  }, [user, isLoading, setLocation]);
+  }, [user, isLoading]);
 
   // Show loading state while checking user status
   if (isLoading || !user) {

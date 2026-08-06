@@ -10,14 +10,12 @@ export default function Register() {
     const { user, isLoading } = useAuth();
     const [, setLocation] = useLocation();
 
-    // FIX: Use useEffect to prevent redirect during render
+    // FIX: Use window.location.href to prevent React Error 310 during Suspense/lazy route transitions
     useEffect(() => {
         if (user) {
-            startTransition(() => {
-                setLocation("/");
-            });
+            window.location.href = "/";
         }
-    }, [user, setLocation]);
+    }, [user]);
 
     if (user) {
         return (

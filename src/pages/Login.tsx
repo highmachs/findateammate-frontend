@@ -10,14 +10,17 @@ export default function Login() {
     const { user, isLoading } = useAuth();
     const [, setLocation] = useLocation();
 
-    // FIX #1: Use useEffect to prevent redirect during render
+    // FIX #1: Use window.location.href to prevent React Error 310 during Suspense/lazy route transitions
     useEffect(() => {
         if (user) {
-            startTransition(() => {
-                setLocation("/teammates");
-            });
+            const hasCompletedOnboarding = user.skills && user.skills.length > 0 && user.city && user.university;
+            if (!hasCompletedOnboarding && !user.isAdmin) {
+                window.location.href = "/onboarding";
+            } else {
+                window.location.href = "/teammates";
+            }
         }
-    }, [user, setLocation]);
+    }, [user]);
 
     if (user) {
         return (
