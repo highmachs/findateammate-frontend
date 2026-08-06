@@ -36,11 +36,11 @@ const Safety = lazy(() => import("@/pages/Safety"));
 const Report = lazy(() => import("@/pages/Report"));
 const Events = lazy(() => import("@/pages/Events"));
 const OrganizerDashboard = lazy(() => import("@/pages/OrganizerDashboard"));
-const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
+import AdminDashboard from "@/pages/AdminDashboard";
 const FAQ = lazy(() => import("@/pages/FAQ"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const Maintenance = lazy(() => import("@/pages/Maintenance"));
-const Onboarding = lazy(() => import("@/pages/Onboarding"));
+import Onboarding from "@/pages/Onboarding";
 
 import { initMonitor } from "./lib/monitor";
 import { MaintenanceProvider } from "@/hooks/use-maintenance";

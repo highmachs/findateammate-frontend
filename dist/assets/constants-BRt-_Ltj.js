@@ -1,1 +1,0 @@
-const a=["RIT","CET","BARTON","MITS"],E=["CSE","ECE","MECH","CIVIL","IT","EEE","OTHER"],e=["JavaScript","TypeScript","React","Node.js","Python","Java","C++","UI/UX","Figma","DevOps","Docker","AWS","Machine Learning","Data Science","Other"];export{a as C,E as D,e as S};
