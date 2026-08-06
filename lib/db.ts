@@ -17,23 +17,8 @@ const dbUrl = isVercel
 export const tursoClient = createClient({
   url: dbUrl,
   authToken: process.env.TURSO_AUTH_TOKEN,
-  // Fix Vercel Serverless Node 20 fetch keep-alive hanging bug
-  ...(isVercel ? {
-    fetch: (url: string | URL | Request, init?: RequestInit) => {
-      const headers = new Headers(init?.headers);
-      headers.set('Connection', 'close');
-      
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      
-      if (init?.signal) {
-        init.signal.addEventListener('abort', () => controller.abort());
-      }
-      
-      return fetch(url, { ...init, headers, signal: controller.signal })
-        .finally(() => clearTimeout(timeout));
-    }
-  } : {})
+  // Let @libsql/client use its native fetch implementation
+  // We removed the custom fetch override because it was causing 500 abort errors
 });
 
 export const db = drizzle(tursoClient, { schema });
