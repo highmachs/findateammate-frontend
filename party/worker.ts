@@ -1,9 +1,9 @@
 // Worker entrypoint for Wrangler — exports all Durable Object classes
 // and routes incoming requests to the correct party room.
 import { routePartykitRequest } from "partyserver";
-import { Chat } from "./chat";
-import { Notifications } from "./notifications";
-import { Global } from "./global";
+import Chat from "./chat";
+import Notifications from "./notifications";
+import Global from "./global";
 
 export { Chat, Notifications, Global };
 

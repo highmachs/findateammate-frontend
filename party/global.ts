@@ -35,7 +35,7 @@ export default class Global implements Party.Server {
   }
 
   // Vercel API pushes maintenance state changes here
-  async onRequest(request: Request): Promise<Response> {
+  async onRequest(request: Party.Request): Promise<Response> {
     const secret = request.headers.get("x-partykit-secret");
     if (secret !== (this.env.PARTYKIT_SECRET as string)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });

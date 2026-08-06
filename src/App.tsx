@@ -14,32 +14,29 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import NotFound from "@/pages/not-found";
 import BannedPage from "@/pages/BannedPage";
-
-// Lazy Load Non-Critical Pages for Performance
-import { lazy, Suspense, useEffect } from "react";
-import { Loader2 } from "lucide-react"; // Or any spinner
-
-const Profile = lazy(() => import("@/pages/Profile"));
-const PublicProfile = lazy(() => import("@/pages/PublicProfile"));
-const Browse = lazy(() => import("@/pages/Browse"));
-const PostDetail = lazy(() => import("@/pages/PostDetail"));
-const CreatePost = lazy(() => import("@/pages/CreatePost"));
-const Requests = lazy(() => import("@/pages/Requests"));
-const Chat = lazy(() => import("@/pages/Chat"));
-const MyPosts = lazy(() => import("@/pages/MyPosts"));
-const About = lazy(() => import("@/pages/About"));
-const Contact = lazy(() => import("@/pages/Contact"));
-const Guidelines = lazy(() => import("@/pages/Guidelines"));
-const Privacy = lazy(() => import("@/pages/Privacy"));
-const Terms = lazy(() => import("@/pages/Terms"));
-const Safety = lazy(() => import("@/pages/Safety"));
-const Report = lazy(() => import("@/pages/Report"));
-const Events = lazy(() => import("@/pages/Events"));
-const OrganizerDashboard = lazy(() => import("@/pages/OrganizerDashboard"));
+import { useEffect } from "react";
+import { Loader2 } from "lucide-react";
+import Profile from "@/pages/Profile";
+import PublicProfile from "@/pages/PublicProfile";
+import Browse from "@/pages/Browse";
+import PostDetail from "@/pages/PostDetail";
+import CreatePost from "@/pages/CreatePost";
+import Requests from "@/pages/Requests";
+import Chat from "@/pages/Chat";
+import MyPosts from "@/pages/MyPosts";
+import About from "@/pages/About";
+import Contact from "@/pages/Contact";
+import Guidelines from "@/pages/Guidelines";
+import Privacy from "@/pages/Privacy";
+import Terms from "@/pages/Terms";
+import Safety from "@/pages/Safety";
+import Report from "@/pages/Report";
+import Events from "@/pages/Events";
+import OrganizerDashboard from "@/pages/OrganizerDashboard";
 import AdminDashboard from "@/pages/AdminDashboard";
-const FAQ = lazy(() => import("@/pages/FAQ"));
-const Notifications = lazy(() => import("@/pages/Notifications"));
-const Maintenance = lazy(() => import("@/pages/Maintenance"));
+import FAQ from "@/pages/FAQ";
+import Notifications from "@/pages/Notifications";
+import Maintenance from "@/pages/Maintenance";
 import Onboarding from "@/pages/Onboarding";
 
 import { initMonitor } from "./lib/monitor";
@@ -58,7 +55,7 @@ function Router() {
   }, []);
 
   return (
-    <Suspense fallback={<PageLoader />}>
+    <>
       <Switch>
         <Route path="/dashboard">
           <Redirect to="/admin" />
@@ -98,7 +95,7 @@ function Router() {
         
         <Route component={NotFound} />
       </Switch>
-    </Suspense>
+    </>
   );
 }
 

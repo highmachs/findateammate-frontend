@@ -149,7 +149,7 @@ export default class Chat implements Party.Server {
   }
 
   // HTTP endpoint: Vercel API posts messages here for broadcast
-  async onRequest(request: Request): Promise<Response> {
+  async onRequest(request: Party.Request): Promise<Response> {
     const secret = request.headers.get("x-partykit-secret");
     if (secret !== (this.env.PARTYKIT_SECRET as string)) {
       return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 });
