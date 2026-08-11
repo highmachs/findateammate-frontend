@@ -34,7 +34,7 @@ export function Footer() {
                             <a href="https://ahilight.vercel.app" target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all" aria-label="Website">
                                 <Globe size={18} />
                             </a>
-                            <a href="https://www.linkedin.com/company/findateammate/" target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all" aria-label="LinkedIn">
+                            <a href="https://www.linkedin.com/company/ahixlight/" target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all" aria-label="LinkedIn">
                                 <Linkedin size={18} />
                             </a>
                             <a href="mailto:findateammate.ahilight@gmail.com" className="p-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all" aria-label="Email">
@@ -91,7 +91,7 @@ export function Footer() {
 
                 <div className="border-t border-border/10 pt-6 flex flex-col md:flex-row justify-between items-center gap-4">
                     <p className="text-xs text-muted-foreground font-medium">
-                        © 2026 FindATeammate (by <strong>AhiLight</strong>). All rights reserved.
+                        © 2026 FindATeammate (by <strong>Ahi<span className="text-primary">X</span>Light</strong>). All rights reserved.
                     </p>
                 </div>
             </div>
