@@ -72,7 +72,7 @@ export default function Landing() {
                 <span className="font-display font-bold text-lg sm:text-2xl text-foreground tracking-tight">
                   Find<span className="text-primary">A</span>Teammate
                 </span>
-                <span className="text-[10px] sm:text-xs font-medium opacity-50 -mt-1">by AhiLight</span>
+                <span className="text-[10px] sm:text-xs font-medium opacity-50 -mt-1">by Ahi<span className="text-primary">X</span>light</span>
               </div>
             </div>
             <div className="flex items-center gap-4">

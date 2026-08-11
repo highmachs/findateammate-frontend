@@ -171,7 +171,7 @@ export function Navbar() {
                                 <span className="font-display font-bold text-lg sm:text-xl lg:text-2xl tracking-tight text-foreground">
                                     Find<span className="text-primary">A</span>Teammate
                                 </span>
-                                <span className="text-[10px] sm:text-xs font-medium opacity-50 -mt-1">by AhiLight</span>
+                                <span className="text-[10px] sm:text-xs font-medium opacity-50 -mt-1">by Ahi<span className="text-primary">X</span>light</span>
                             </div>
                         </a>
                     </Link>
