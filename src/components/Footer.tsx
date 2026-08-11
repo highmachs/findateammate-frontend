@@ -31,7 +31,7 @@ export function Footer() {
                             Empowering builders to find the perfect teammates for hackathons, startups, and side projects. Built by builders, for builders.
                         </p>
                         <div className="flex items-center gap-4">
-                            <a href="https://ahilight.vercel.app" target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all" aria-label="Website">
+                            <a href="https://ahixlight.com" target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all" aria-label="Website">
                                 <Globe size={18} />
                             </a>
                             <a href="https://www.linkedin.com/company/ahixlight/" target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all" aria-label="LinkedIn">
