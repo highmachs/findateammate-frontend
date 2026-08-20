@@ -164,16 +164,14 @@ export function Navbar() {
             <div className="container mx-auto px-3 sm:px-4 lg:px-6">
                 <div className="flex items-center justify-between h-14 sm:h-16 lg:h-20">
                     {/* Logo Area */}
-                    <Link href="/">
-                        <a className="flex items-center gap-2 sm:gap-3 group shrink-0">
-                            <img src={logo} alt="FindATeammate Logo" className="h-8 sm:h-10 lg:h-12 w-auto object-contain" />
-                            <div className="flex flex-col">
-                                <span className="font-display font-bold text-lg sm:text-xl lg:text-2xl tracking-tight text-foreground">
-                                    Find<span className="text-primary">A</span>Teammate
-                                </span>
-                                <span className="text-[10px] sm:text-xs font-medium opacity-50 -mt-1">by Ahi<span className="text-primary">X</span>light</span>
-                            </div>
-                        </a>
+                    <Link href="/" className="flex items-center gap-2 sm:gap-3 group shrink-0">
+                        <img src={logo} alt="FindATeammate Logo" className="h-8 sm:h-10 lg:h-12 w-auto object-contain" />
+                        <div className="flex flex-col">
+                            <span className="font-display font-bold text-lg sm:text-xl lg:text-2xl tracking-tight text-foreground">
+                                Find<span className="text-primary">A</span>Teammate
+                            </span>
+                            <span className="text-[10px] sm:text-xs font-medium opacity-50 -mt-1">by Ahi<span className="text-primary">X</span>light</span>
+                        </div>
                     </Link>
 
                     {/* Desktop Navigation */}

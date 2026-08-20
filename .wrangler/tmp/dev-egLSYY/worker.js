@@ -930,21 +930,6 @@ globalThis.process = process_default;
 
 // node_modules/partyserver/dist/index.js
 import { DurableObject, env as env2 } from "cloudflare:workers";
-
-// node_modules/nanoid/url-alphabet/index.js
-var urlAlphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
-
-// node_modules/nanoid/index.browser.js
-var nanoid = /* @__PURE__ */ __name((size = 21) => {
-  let id = "";
-  let bytes = crypto.getRandomValues(new Uint8Array(size |= 0));
-  while (size--) {
-    id += urlAlphabet[bytes[size] & 63];
-  }
-  return id;
-}, "nanoid");
-
-// node_modules/partyserver/dist/index.js
 if (!("OPEN" in WebSocket)) {
   const WebSocketStatus = {
     CONNECTING: WebSocket.READY_STATE_CONNECTING,
@@ -955,30 +940,6 @@ if (!("OPEN" in WebSocket)) {
   Object.assign(WebSocket, WebSocketStatus);
   Object.assign(WebSocket.prototype, WebSocketStatus);
 }
-function tryGetPartyServerMeta(ws) {
-  try {
-    const attachment = WebSocket.prototype.deserializeAttachment.call(ws);
-    if (!attachment || typeof attachment !== "object") return null;
-    if (!("__pk" in attachment)) return null;
-    const pk = attachment.__pk;
-    if (!pk || typeof pk !== "object") return null;
-    const { id, tags } = pk;
-    if (typeof id !== "string") return null;
-    const { uri } = pk;
-    return {
-      id,
-      tags: Array.isArray(tags) ? tags : [],
-      uri: typeof uri === "string" ? uri : void 0
-    };
-  } catch {
-    return null;
-  }
-}
-__name(tryGetPartyServerMeta, "tryGetPartyServerMeta");
-function isPartyServerWebSocket(ws) {
-  return tryGetPartyServerMeta(ws) !== null;
-}
-__name(isPartyServerWebSocket, "isPartyServerWebSocket");
 var AttachmentCache = class {
   static {
     __name(this, "AttachmentCache");
@@ -999,227 +960,6 @@ var AttachmentCache = class {
   }
 };
 var attachments = new AttachmentCache();
-var connections = /* @__PURE__ */ new WeakSet();
-var isWrapped = /* @__PURE__ */ __name((ws) => {
-  return connections.has(ws);
-}, "isWrapped");
-var createLazyConnection = /* @__PURE__ */ __name((ws) => {
-  if (isWrapped(ws)) return ws;
-  let initialState;
-  if ("state" in ws) {
-    initialState = ws.state;
-    delete ws.state;
-  }
-  const connection = Object.defineProperties(ws, {
-    id: {
-      configurable: true,
-      get() {
-        return attachments.get(ws).__pk.id;
-      }
-    },
-    uri: {
-      configurable: true,
-      get() {
-        return attachments.get(ws).__pk.uri ?? null;
-      }
-    },
-    tags: {
-      configurable: true,
-      get() {
-        return attachments.get(ws).__pk.tags ?? [];
-      }
-    },
-    socket: {
-      configurable: true,
-      get() {
-        return ws;
-      }
-    },
-    state: {
-      configurable: true,
-      get() {
-        return ws.deserializeAttachment();
-      }
-    },
-    setState: {
-      configurable: true,
-      value: /* @__PURE__ */ __name(function setState(setState) {
-        let state;
-        if (setState instanceof Function) state = setState(this.state);
-        else state = setState;
-        ws.serializeAttachment(state);
-        return state;
-      }, "setState")
-    },
-    deserializeAttachment: {
-      configurable: true,
-      value: /* @__PURE__ */ __name(function deserializeAttachment() {
-        return attachments.get(ws).__user ?? null;
-      }, "deserializeAttachment")
-    },
-    serializeAttachment: {
-      configurable: true,
-      value: /* @__PURE__ */ __name(function serializeAttachment(attachment) {
-        const setting = {
-          ...attachments.get(ws),
-          __user: attachment ?? null
-        };
-        attachments.set(ws, setting);
-      }, "serializeAttachment")
-    }
-  });
-  if (initialState) connection.setState(initialState);
-  connections.add(connection);
-  return connection;
-}, "createLazyConnection");
-var HibernatingConnectionIterator = class {
-  static {
-    __name(this, "HibernatingConnectionIterator");
-  }
-  index = 0;
-  sockets;
-  constructor(state, tag2) {
-    this.state = state;
-    this.tag = tag2;
-  }
-  [Symbol.iterator]() {
-    return this;
-  }
-  next() {
-    const sockets = this.sockets ?? (this.sockets = this.state.getWebSockets(this.tag));
-    let socket;
-    while (socket = sockets[this.index++]) if (socket.readyState === WebSocket.READY_STATE_OPEN) {
-      if (!isPartyServerWebSocket(socket)) continue;
-      return {
-        done: false,
-        value: createLazyConnection(socket)
-      };
-    }
-    return {
-      done: true,
-      value: void 0
-    };
-  }
-};
-function prepareTags(connectionId, userTags) {
-  const tags = [connectionId, ...userTags.filter((t) => t !== connectionId)];
-  if (tags.length > 10) throw new Error("A connection can only have 10 tags, including the default id tag.");
-  for (const tag2 of tags) {
-    if (typeof tag2 !== "string") throw new Error(`A connection tag must be a string. Received: ${tag2}`);
-    if (tag2 === "") throw new Error("A connection tag must not be an empty string.");
-    if (tag2.length > 256) throw new Error("A connection tag must not exceed 256 characters");
-  }
-  return tags;
-}
-__name(prepareTags, "prepareTags");
-var InMemoryConnectionManager = class {
-  static {
-    __name(this, "InMemoryConnectionManager");
-  }
-  #connections = /* @__PURE__ */ new Map();
-  tags = /* @__PURE__ */ new WeakMap();
-  getCount() {
-    return this.#connections.size;
-  }
-  getConnection(id) {
-    return this.#connections.get(id);
-  }
-  *getConnections(tag2) {
-    if (!tag2) {
-      yield* this.#connections.values().filter((c) => c.readyState === WebSocket.READY_STATE_OPEN);
-      return;
-    }
-    for (const connection of this.#connections.values()) if ((this.tags.get(connection) ?? []).includes(tag2)) yield connection;
-  }
-  accept(connection, options) {
-    try {
-      connection.accept({ allowHalfOpen: true });
-    } catch {
-      connection.accept();
-    }
-    try {
-      connection.binaryType = "arraybuffer";
-    } catch {
-    }
-    const tags = prepareTags(connection.id, options.tags);
-    this.#connections.set(connection.id, connection);
-    this.tags.set(connection, tags);
-    Object.defineProperty(connection, "tags", {
-      get: /* @__PURE__ */ __name(() => tags, "get"),
-      configurable: true
-    });
-    const removeConnection = /* @__PURE__ */ __name(() => {
-      this.#connections.delete(connection.id);
-      connection.removeEventListener("close", removeConnection);
-      connection.removeEventListener("error", removeConnection);
-    }, "removeConnection");
-    connection.addEventListener("close", removeConnection);
-    connection.addEventListener("error", removeConnection);
-    return connection;
-  }
-};
-var HibernatingConnectionManager = class {
-  static {
-    __name(this, "HibernatingConnectionManager");
-  }
-  constructor(controller) {
-    this.controller = controller;
-  }
-  getCount() {
-    let count3 = 0;
-    for (const ws of this.controller.getWebSockets()) if (isPartyServerWebSocket(ws)) count3++;
-    return count3;
-  }
-  getConnection(id) {
-    const matching = this.controller.getWebSockets(id).filter((ws) => {
-      return tryGetPartyServerMeta(ws)?.id === id;
-    });
-    if (matching.length === 0) return void 0;
-    if (matching.length === 1) return createLazyConnection(matching[0]);
-    throw new Error(`More than one connection found for id ${id}. Did you mean to use getConnections(tag) instead?`);
-  }
-  getConnections(tag2) {
-    return new HibernatingConnectionIterator(this.controller, tag2);
-  }
-  accept(connection, options) {
-    const tags = prepareTags(connection.id, options.tags);
-    this.controller.acceptWebSocket(connection, tags);
-    connection.serializeAttachment({
-      __pk: {
-        id: connection.id,
-        tags,
-        uri: connection.uri ?? void 0
-      },
-      __user: null
-    });
-    return createLazyConnection(connection);
-  }
-};
-var CLOSING = 2;
-var CLOSED = 3;
-function isBenignTeardownError(ws, error3) {
-  const state = ws.readyState;
-  if (state !== CLOSING && state !== CLOSED) return false;
-  if (typeof error3 !== "object" || error3 === null) return false;
-  const typed = error3;
-  if (typed.retryable === true) return true;
-  const message2 = typeof typed.message === "string" ? typed.message : "";
-  return /Network connection lost|WebSocket peer disconnected/i.test(message2);
-}
-__name(isBenignTeardownError, "isBenignTeardownError");
-var NAME_STORAGE_KEY = "__ps_name";
-function isReservedCloseCode(code) {
-  return code === 1005 || code === 1006 || code === 1015;
-}
-__name(isReservedCloseCode, "isReservedCloseCode");
-function closeQuietly(ws, code, reason) {
-  if (isReservedCloseCode(code)) return;
-  try {
-    ws.close(code, reason);
-  } catch {
-  }
-}
-__name(closeQuietly, "closeQuietly");
 var serverMapCache = /* @__PURE__ */ new WeakMap();
 var bindingNameCache = /* @__PURE__ */ new WeakMap();
 var DEFAULT_ROUTING_RETRY_OPTIONS = {
@@ -1300,15 +1040,6 @@ function encodeProps(props) {
   return btoa(binary);
 }
 __name(encodeProps, "encodeProps");
-function decodeProps(header) {
-  const trimmed = header.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return JSON.parse(trimmed);
-  const binary = atob(header);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return JSON.parse(new TextDecoder().decode(bytes));
-}
-__name(decodeProps, "decodeProps");
 function camelCaseToKebabCase(str) {
   if (str === str.toUpperCase() && str !== str.toLowerCase()) return str.toLowerCase().replace(/_/g, "-");
   let kebabified = str.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
@@ -1414,391 +1145,6 @@ Did you forget to add a durable object binding to the class ${namespace[0].toUpp
   } else return null;
 }
 __name(routePartykitRequest, "routePartykitRequest");
-var Server = class extends DurableObject {
-  static {
-    __name(this, "Server");
-  }
-  static options = { hibernate: false };
-  #status = "zero";
-  #ParentClass = Object.getPrototypeOf(this).constructor;
-  #connectionManager = this.#ParentClass.options.hibernate ? new HibernatingConnectionManager(this.ctx) : new InMemoryConnectionManager();
-  /**
-  * Execute SQL queries against the Server's database
-  * @template T Type of the returned rows
-  * @param strings SQL query template strings
-  * @param values Values to be inserted into the query
-  * @returns Array of query results
-  */
-  sql(strings, ...values) {
-    let query = "";
-    try {
-      query = strings.reduce((acc, str, i) => acc + str + (i < values.length ? "?" : ""), "");
-      return [...this.ctx.storage.sql.exec(query, ...values)];
-    } catch (e) {
-      console.error(`failed to execute sql query: ${query}`, e);
-      throw this.onException(e);
-    }
-  }
-  constructor(ctx, env3) {
-    super(ctx, env3);
-  }
-  /**
-  * Handle incoming requests to the server.
-  */
-  async fetch(request) {
-    try {
-      const props = request.headers.get("x-partykit-props");
-      if (props) this.#_props = decodeProps(props);
-      if (!this.ctx.id.name && !this.#_name) {
-        const room = request.headers.get("x-partykit-room");
-        if (room) this.#_name = room;
-      }
-      await this.#ensureInitialized();
-      if (!this.ctx.id.name && !this.#_name) throw new Error(`Cannot determine the name for ${this.#ParentClass.name}: this.ctx.id.name is undefined, no legacy __ps_name storage record is present, and no x-partykit-room header was supplied. Likely causes:
-  1. The stub was built via idFromString()/newUniqueId(). PartyServer requires name-based addressing (idFromName/getByName).
-  2. The workerd/wrangler runtime is too old to expose ctx.id.name \u2014 update to a recent wrangler release.
-  3. You called stub.fetch() directly without going through routePartykitRequest()/getServerByName(). Prefer those, or set the x-partykit-room header.`);
-      const url = new URL(request.url);
-      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return await this.onRequest(request);
-      else {
-        const { 0: clientWebSocket, 1: serverWebSocket } = new WebSocketPair();
-        let connectionId = url.searchParams.get("_pk");
-        if (!connectionId) connectionId = nanoid();
-        let connection = Object.assign(serverWebSocket, {
-          id: connectionId,
-          uri: request.url,
-          server: this.name,
-          tags: [],
-          state: null,
-          setState(setState) {
-            let state;
-            if (setState instanceof Function) state = setState(this.state);
-            else state = setState;
-            this.state = state;
-            return this.state;
-          }
-        });
-        const ctx = { request };
-        const tags = await this.getConnectionTags(connection, ctx);
-        connection = this.#connectionManager.accept(connection, { tags });
-        if (!this.#ParentClass.options.hibernate) this.#attachSocketEventHandlers(connection);
-        await this.onConnect(connection, ctx);
-        return new Response(null, {
-          status: 101,
-          webSocket: clientWebSocket
-        });
-      }
-    } catch (err) {
-      console.error(`Error in ${this.#ParentClass.name}:${this.ctx.id.name ?? this.#_name ?? "<unnamed>"} fetch:`, err);
-      if (!(err instanceof Error)) throw err;
-      if (request.headers.get("Upgrade") === "websocket") {
-        const pair = new WebSocketPair();
-        pair[1].accept();
-        pair[1].send(JSON.stringify({ error: err.stack }));
-        pair[1].close(1011, "Uncaught exception during session setup");
-        return new Response(null, {
-          status: 101,
-          webSocket: pair[0]
-        });
-      } else return new Response(err.stack, { status: 500 });
-    }
-  }
-  async webSocketMessage(ws, message2) {
-    if (!isPartyServerWebSocket(ws)) return;
-    try {
-      const connection = createLazyConnection(ws);
-      await this.#ensureInitialized();
-      connection.server = this.name;
-      return this.onMessage(connection, message2);
-    } catch (e) {
-      console.error(`Error in ${this.#ParentClass.name}:${this.ctx.id.name ?? this.#_name ?? "<unnamed>"} webSocketMessage:`, e);
-    }
-  }
-  async webSocketClose(ws, code, reason, wasClean) {
-    if (!isPartyServerWebSocket(ws)) return;
-    try {
-      const connection = createLazyConnection(ws);
-      await this.#ensureInitialized();
-      connection.server = this.name;
-      await this.onClose(connection, code, reason, wasClean);
-    } catch (e) {
-      console.error(`Error in ${this.#ParentClass.name}:${this.ctx.id.name ?? this.#_name ?? "<unnamed>"} webSocketClose:`, e);
-    } finally {
-      closeQuietly(ws, code, reason);
-    }
-  }
-  async webSocketError(ws, error3) {
-    if (!isPartyServerWebSocket(ws)) return;
-    if (isBenignTeardownError(ws, error3)) return;
-    try {
-      const connection = createLazyConnection(ws);
-      await this.#ensureInitialized();
-      connection.server = this.name;
-      return this.onError(connection, error3);
-    } catch (e) {
-      console.error(`Error in ${this.#ParentClass.name}:${this.ctx.id.name ?? this.#_name ?? "<unnamed>"} webSocketError:`, e);
-    }
-  }
-  /**
-  * Read the legacy `__ps_name` storage record as a fallback source of
-  * `this.name` when `ctx.id.name` is unavailable. Covers:
-  *
-  *   1. Alarm handlers firing on alarm records that were scheduled by
-  *      a workerd version that did not yet persist `name` into the
-  *      alarm record (see the Durable Objects ID docs:
-  *      https://developers.cloudflare.com/durable-objects/api/id/#name).
-  *      The runtime contract for current workerd populates `ctx.id.name`
-  *      in alarm handlers — see the "Raw runtime contract" tests — so
-  *      this fallback exists primarily for stale on-disk alarm records
-  *      and for defense-in-depth against future runtime changes.
-  *   2. Legacy framework-level bootstrap patterns that write
-  *      `__ps_name` directly (or call `setName()`) before triggering
-  *      `__unsafe_ensureInitialized()` — typically DOs addressed via
-  *      `idFromString()` / `newUniqueId()` plus a name override.
-  */
-  async #hydrateNameFromLegacyStorage() {
-    if (this.#_name) return;
-    const stored = await this.ctx.storage.get(NAME_STORAGE_KEY);
-    if (stored) this.#_name = stored;
-  }
-  async #persistNameFallbackFromCtxId() {
-    const ctxName = this.ctx.id.name;
-    if (ctxName === void 0 || this.#_name) return;
-    if (await this.ctx.storage.get(NAME_STORAGE_KEY) !== ctxName) await this.ctx.storage.put(NAME_STORAGE_KEY, ctxName);
-    this.#_name = ctxName;
-  }
-  /**
-  * @internal — Do not use directly. This is an escape hatch for frameworks
-  * (like Agents) that receive calls via native DO RPC, bypassing the
-  * standard fetch/alarm/webSocket entry points where initialization
-  * normally happens. Calling this from application code is unsupported
-  * and may break without notice.
-  */
-  async __unsafe_ensureInitialized() {
-    await this.#ensureInitialized();
-  }
-  async #ensureInitialized() {
-    if (this.#status === "started") return;
-    if (this.ctx.id.name !== void 0) await this.#persistNameFallbackFromCtxId();
-    else if (!this.#_name) await this.#hydrateNameFromLegacyStorage();
-    let error3;
-    await this.ctx.blockConcurrencyWhile(async () => {
-      this.#status = "starting";
-      try {
-        await this.onStart(this.#_props);
-        this.#status = "started";
-      } catch (e) {
-        this.#status = "zero";
-        error3 = e;
-      }
-    });
-    if (error3) throw error3;
-  }
-  #attachSocketEventHandlers(connection) {
-    const handleMessageFromClient = /* @__PURE__ */ __name((event) => {
-      this.onMessage(connection, event.data)?.catch((e) => {
-        console.error("onMessage error:", e);
-      });
-    }, "handleMessageFromClient");
-    const reciprocateClose = /* @__PURE__ */ __name((event) => {
-      closeQuietly(connection, event.code, event.reason);
-    }, "reciprocateClose");
-    const handleCloseFromClient = /* @__PURE__ */ __name((event) => {
-      connection.removeEventListener("message", handleMessageFromClient);
-      connection.removeEventListener("close", handleCloseFromClient);
-      let result;
-      try {
-        result = this.onClose(connection, event.code, event.reason, event.wasClean);
-      } catch (e) {
-        console.error("onClose error:", e);
-        reciprocateClose(event);
-        return;
-      }
-      if (result && typeof result.then === "function") result.catch((e) => {
-        console.error("onClose error:", e);
-      }).finally(() => reciprocateClose(event));
-      else reciprocateClose(event);
-    }, "handleCloseFromClient");
-    const handleErrorFromClient = /* @__PURE__ */ __name((e) => {
-      connection.removeEventListener("message", handleMessageFromClient);
-      connection.removeEventListener("error", handleErrorFromClient);
-      if (isBenignTeardownError(connection, e.error)) return;
-      this.onError(connection, e.error)?.catch((err) => {
-        console.error("onError error:", err);
-      });
-    }, "handleErrorFromClient");
-    connection.addEventListener("close", handleCloseFromClient);
-    connection.addEventListener("error", handleErrorFromClient);
-    connection.addEventListener("message", handleMessageFromClient);
-  }
-  #_name;
-  /**
-  * The name for this server.
-  *
-  * Resolves from `this.ctx.id.name` — the native DO id name, populated
-  * whenever the stub was created via `idFromName()` or `getByName()`.
-  * This is available inside every entry point (including the constructor,
-  * alarms, and hibernating websocket handlers).
-  *
-  * For alarm handlers firing on stale on-disk alarm records from
-  * older workerd versions that didn't persist `name` into the alarm
-  * record, the name is recovered from a storage fallback record.
-  *
-  * Throws if neither source is available — typically this means the DO
-  * was addressed via `idFromString()` or `newUniqueId()`, which is not
-  * supported by PartyServer.
-  */
-  get name() {
-    const ctxName = this.ctx.id.name;
-    if (ctxName !== void 0) return ctxName;
-    if (this.#_name) return this.#_name;
-    throw new Error(`Attempting to read .name on ${this.#ParentClass.name}, but this.ctx.id.name is not set and no ${NAME_STORAGE_KEY} fallback record is available. PartyServer requires DOs to be addressed via idFromName()/getByName(), or explicitly bootstrapped with setName() when using idFromString()/newUniqueId(). If this happens in an alarm handler firing on a stale alarm record, initialize the DO from a fetch/RPC entry point first so PartyServer can persist the fallback name.`);
-  }
-  /**
-  * Establish this server's name and trigger `onStart()`.
-  *
-  * Use cases:
-  *
-  *   1. **Framework-level bootstrap of DOs where `ctx.id.name` is
-  *      undefined** — e.g. DOs addressed via `idFromString()` /
-  *      `newUniqueId()`. `setName()` stashes the name in memory and
-  *      persists it under `__ps_name` so cold-wake invocations
-  *      recover it via `#ensureInitialized()`'s legacy fallback.
-  *   2. **Delivering initial `props` to `onStart()`** via the
-  *      optional second argument.
-  *
-  * For DOs addressed via `idFromName()` / `getByName()`, calling
-  * `setName()` is redundant — `this.name` is available automatically
-  * from `ctx.id.name`. The normal initialization path also persists
-  * a fallback record so old-compat alarm handlers can recover the name.
-  * Throws if `name` does not match `ctx.id.name`.
-  *
-  * **Not appropriate for facets.** Cloudflare Agents and any other
-  * framework using `ctx.facets.get(...)` should pass an explicit
-  * `id` in `FacetStartupOptions` so the facet has its own
-  * `ctx.id.name`:
-  *
-  * ```ts
-  * const stub = ctx.facets.get(facetKey, () => ({
-  *   class: ChildClass,
-  *   id: ctx.exports.SomeBoundDOClass.idFromName(facetName),
-  * }));
-  * ```
-  *
-  * Without an explicit `id`, the facet inherits the parent DO's
-  * `ctx.id` (including `ctx.id.name`), and `setName()` will throw
-  * the ctx.id.name-mismatch error because the facet's intended
-  * name differs from the parent's. See
-  * https://developers.cloudflare.com/dynamic-workers/usage/durable-object-facets/
-  * for the `FacetStartupOptions.id` semantics.
-  *
-  * @deprecated for callers that address DOs via `idFromName()` /
-  * `getByName()`. Still the supported API for framework-level
-  * bootstrap of header/`newUniqueId`-addressed DOs and for
-  * delivering initial `props` to `onStart()`.
-  */
-  async setName(name, props) {
-    if (!name) throw new Error("A name is required.");
-    const ctxName = this.ctx.id.name;
-    if (ctxName !== void 0 && ctxName !== name) throw new Error(`This server's Durable Object id was created for name "${ctxName}", cannot setName to "${name}".`);
-    if (this.#_name && this.#_name !== name) throw new Error(`This server already has a name: ${this.#_name}, attempting to set to: ${name}`);
-    if (props !== void 0) this.#_props = props;
-    if (!this.#_name && ctxName === void 0) {
-      await this.ctx.storage.put(NAME_STORAGE_KEY, name);
-      this.#_name = name;
-    }
-    await this.#ensureInitialized();
-  }
-  /**
-  * @internal
-  * @deprecated Retained for backward compatibility with older callers.
-  * `routePartykitRequest` no longer uses this method; it sends props via
-  * the `x-partykit-props` header on the underlying `fetch()` request.
-  */
-  async _initAndFetch(name, props, request) {
-    await this.setName(name, props);
-    return this.fetch(request);
-  }
-  #sendMessageToConnection(connection, message2) {
-    try {
-      connection.send(message2);
-    } catch (_e) {
-      connection.close(1011, "Unexpected error");
-    }
-  }
-  /** Send a message to all connected clients, except connection ids listed in `without` */
-  broadcast(msg, without) {
-    for (const connection of this.#connectionManager.getConnections()) if (!without || !without.includes(connection.id)) this.#sendMessageToConnection(connection, msg);
-  }
-  /** Get a connection by connection id */
-  getConnection(id) {
-    return this.#connectionManager.getConnection(id);
-  }
-  /**
-  * Get all connections. Optionally, you can provide a tag to filter returned connections.
-  * Use `Server#getConnectionTags` to tag the connection on connect.
-  */
-  getConnections(tag2) {
-    return this.#connectionManager.getConnections(tag2);
-  }
-  /**
-  * You can tag a connection to filter them in Server#getConnections.
-  * Each connection supports up to 9 tags, each tag max length is 256 characters.
-  */
-  getConnectionTags(connection, context2) {
-    return [];
-  }
-  #_props;
-  /**
-  * Called when the server is started for the first time.
-  */
-  onStart(props) {
-  }
-  /**
-  * Called when a new connection is made to the server.
-  */
-  onConnect(connection, ctx) {
-  }
-  /**
-  * Called when a message is received from a connection.
-  */
-  onMessage(connection, message2) {
-  }
-  /**
-  * Called when a connection is closed.
-  */
-  onClose(connection, code, reason, wasClean) {
-  }
-  /**
-  * Called when an error occurs on a connection.
-  */
-  onError(connection, error3) {
-    console.error(`Error on connection ${connection.id} in ${this.#ParentClass.name}:${this.name}:`, error3);
-    console.info(`Implement onError on ${this.#ParentClass.name} to handle this error.`);
-  }
-  /**
-  * Called when a request is made to the server.
-  */
-  onRequest(request) {
-    console.warn(`onRequest hasn't been implemented on ${this.#ParentClass.name}:${this.name} responding to ${request.url}`);
-    return new Response("Not implemented", { status: 404 });
-  }
-  /**
-  * Called when an exception occurs.
-  * @param error - The error that occurred.
-  */
-  onException(error3) {
-    console.error(`Exception in ${this.#ParentClass.name}:${this.name}:`, error3);
-    console.info(`Implement onException on ${this.#ParentClass.name} to handle this error.`);
-  }
-  onAlarm() {
-    console.log(`Implement onAlarm on ${this.#ParentClass.name} to handle alarms.`);
-  }
-  async alarm() {
-    await this.#ensureInitialized();
-    await this.onAlarm();
-  }
-};
 
 // node_modules/jose/dist/webapi/lib/buffer_utils.js
 var encoder = new TextEncoder();
@@ -2935,11 +2281,22 @@ async function verifyWsToken(token, env3) {
 __name(verifyWsToken, "verifyWsToken");
 
 // party/chat.ts
-var Chat = class extends Server {
+var Chat = class {
+  constructor(room) {
+    this.room = room;
+    this.env = room.env;
+    this.name = room.id;
+  }
+  room;
   static {
     __name(this, "Chat");
   }
+  env;
+  name;
   connectionUsers = /* @__PURE__ */ new Map();
+  broadcast(msg) {
+    this.room.broadcast(msg);
+  }
   async onConnect(conn, ctx) {
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");
@@ -3003,7 +2360,7 @@ var Chat = class extends Server {
     conn.send(JSON.stringify({ type: "join_success", chatId }));
     console.log(`[ChatRoom] User ${userId} joined room ${chatId}`);
   }
-  async onMessage(conn, message2) {
+  async onMessage(message2, conn) {
     const userId = this.connectionUsers.get(conn.id);
     if (!userId) {
       conn.send(JSON.stringify({ type: "error", message: "Not authenticated" }));
@@ -3067,9 +2424,20 @@ var Chat = class extends Server {
 };
 
 // party/notifications.ts
-var Notifications = class extends Server {
+var Notifications = class {
+  constructor(room) {
+    this.room = room;
+    this.env = room.env;
+    this.name = room.id;
+  }
+  room;
   static {
     __name(this, "Notifications");
+  }
+  env;
+  name;
+  broadcast(msg) {
+    this.room.broadcast(msg);
   }
   async onConnect(conn, ctx) {
     const url = new URL(ctx.request.url);
@@ -3114,9 +2482,20 @@ var Notifications = class extends Server {
 };
 
 // party/global.ts
-var Global = class extends Server {
+var Global = class {
+  constructor(room) {
+    this.room = room;
+    this.env = room.env;
+    this.ctx = room;
+  }
+  room;
   static {
     __name(this, "Global");
+  }
+  env;
+  ctx;
+  broadcast(msg) {
+    this.room.broadcast(msg);
   }
   async onConnect(conn, ctx) {
     const url = new URL(ctx.request.url);
@@ -3156,7 +2535,13 @@ var Global = class extends Server {
 // party/worker.ts
 var worker_default = {
   async fetch(request, env3) {
-    return routePartykitRequest(request, env3) || new Response("Not found", { status: 404 });
+    console.log(`[WebSocket Request] ${request.url}`);
+    console.log(`[Env Keys]`, Object.keys(env3));
+    const response = await routePartykitRequest(request, env3);
+    if (!response) {
+      console.log(`[Router] No match found for URL. Returning 404.`);
+    }
+    return response || new Response("Not found", { status: 404 });
   }
 };
 
@@ -3201,7 +2586,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env3, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-CwUtuL/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-BOKGx6/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -3233,7 +2618,7 @@ function __facade_invoke__(request, env3, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-CwUtuL/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-BOKGx6/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
